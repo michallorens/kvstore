@@ -9,7 +9,7 @@ from kvstore import KVStoreAPI
 from kvstore.config import Config
 
 
-MAX_OPS = 10_000
+MAX_OPS = 100_000
 
 
 def percentile(values: list[int], p: float) -> float:

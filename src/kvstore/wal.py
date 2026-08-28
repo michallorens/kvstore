@@ -1,5 +1,7 @@
-from io import BufferedRandom, SEEK_END
+from io import BufferedRandom, SEEK_SET
 from pathlib import Path
+
+from kvstore.keydir import KeyDirEntry
 
 
 class WAL:
@@ -10,10 +12,11 @@ class WAL:
         self.wal_dir = Path(wal_dir)
         self.max_wal_size = max_wal_size
         self.wal_dir.mkdir(parents=True, exist_ok=True)
-        self.current = self._open_log(self._youngest_log_number())
-        self.current_size = self.current.seek(0, SEEK_END)
+        self.current_segment = self._youngest_log_number()
+        self.current = self._open_log(self.current_segment)
+        self.current_size = self.current.seek(0, SEEK_SET)
 
-    def append(self, key: bytes, value: bytes) -> None:
+    def append(self, key: bytes, value: bytes) -> KeyDirEntry:
         record_size = len(key) + len(value) + 8
         if (
             self.max_wal_size is not None
@@ -22,17 +25,25 @@ class WAL:
         ):
             self._rotate()
 
-        self.current.write(key)
-        self.current.write(value)
         self.current.write(len(key).to_bytes(4))
         self.current.write(len(value).to_bytes(4))
+        self.current.write(key)
+
+        offset = self.current.tell()
+
+        self.current.write(value)
         self.current_size += record_size
         self.current.flush()
 
+        return KeyDirEntry(
+            segment=self.current_segment, offset=offset, value_size=len(value)
+        )
+
     def _rotate(self) -> None:
         self.current.close()
-        self.current = self._open_log(self._youngest_log_number() + 1)
-        self.current_size = self.current.seek(0, SEEK_END)
+        self.current_segment = self._youngest_log_number() + 1
+        self.current = self._open_log(self.current_segment)
+        self.current_size = self.current.seek(0, SEEK_SET)
 
     def _youngest_log_number(self) -> int:
         log_numbers = [
