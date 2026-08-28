@@ -71,6 +71,7 @@ class KeyDir:
             value_size = int.from_bytes(header[8:])
 
             if not key_size or not value_size:
+                file.truncate(pos)
                 break
 
             key = file.read(key_size)

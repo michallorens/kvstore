@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-28
+
+```
+READ : p50=   15.67 us | p95=  631.07 us | p99= 1858.75 us | p99.9= 3344.89 us | max= 5909.88 us
+WRITE: p50=    6.47 us | p95=   24.72 us | p99=   37.65 us | p99.9=   53.97 us | max= 2080.92 us
+READ_RANGE: p50=31794.89 us | p95=61994.50 us | p99=73037.52 us | p99.9=94226.85 us | max=109517.12 us
+RATE : 498.60 ops/s
+```
+
+### Added
+
+- Naive key range scan of WAL files
+  - **NOTE** The range scans are impacting point reads, likely due to OS page cache eviction
+
 ## [0.3.0] - 2026-08-28
 
 ```

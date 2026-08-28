@@ -33,6 +33,7 @@ def format_latency_stats(latencies: list[int]) -> str:
 
 def print_stats(
     read_latencies: list[int],
+    range_read_latencies: list[int],
     write_latencies: list[int],
     operations: int,
     elapsed_ns: int,
@@ -40,9 +41,10 @@ def print_stats(
     throughput = operations / (elapsed_ns / 1_000_000_000)
 
     sys.stdout.write(
-        "\033[3A"
+        "\033[4A"
         f"\rREAD : {format_latency_stats(read_latencies)}\n"
         f"\rWRITE: {format_latency_stats(write_latencies)}\n"
+        f"\rREAD_RANGE: {format_latency_stats(range_read_latencies)}\n"
         f"\rRATE : {throughput:,.2f} ops/s                \n"
     )
     sys.stdout.flush()
@@ -62,18 +64,21 @@ class TestKVStoreBenchmark(TestCase):
             values: dict[bytes, bytes] = {}
 
             read_latencies: list[int] = []
+            range_read_latencies: list[int] = []
             write_latencies: list[int] = []
 
             operations = MAX_OPS
 
             print("READ")
             print("WRITE")
+            print("READ_RANGE")
             print("RATE : starting...")
 
             start = time.perf_counter_ns()
 
             for i in range(operations):
-                if not keys or rng.random() < 0.7:
+                operation_type = rng.random()
+                if not keys or operation_type < 0.65:
                     key = rng.randbytes(16)
                     value = rng.randbytes(128)
 
@@ -86,7 +91,7 @@ class TestKVStoreBenchmark(TestCase):
                     keys.append(key)
                     values[key] = value
 
-                else:
+                elif operation_type < 0.95:
                     key = rng.choice(keys)
 
                     operation_start = time.perf_counter_ns()
@@ -97,10 +102,28 @@ class TestKVStoreBenchmark(TestCase):
 
                     self.assertEqual(result, values[key])
 
+                else:
+                    range_start, range_end = sorted((rng.choice(keys), rng.choice(keys)))
+                    operation_start = time.perf_counter_ns()
+                    result = kvstore.read_key_range(range_start, range_end)
+                    elapsed = time.perf_counter_ns() - operation_start
+
+                    range_read_latencies.append(elapsed)
+
+                    self.assertEqual(
+                        result,
+                        {
+                            key: value
+                            for key, value in values.items()
+                            if range_start <= key < range_end
+                        },
+                    )
+
                 if (i + 1) % 1_000 == 0:
                     elapsed = time.perf_counter_ns() - start
                     print_stats(
                         read_latencies,
+                        range_read_latencies,
                         write_latencies,
                         i + 1,
                         elapsed,
