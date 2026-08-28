@@ -151,7 +151,7 @@ class WAL:
     def _read_wal_file_sequentially(
         self,
         file: BufferedRandom,
-        on_put: Callable[[bytes, KeyDirEntry], None],
+        on_put: Callable[[bytes, bytes, KeyDirEntry], None],
         on_delete: Callable[[bytes], None],
     ):
         file.seek(0, SEEK_SET)
@@ -177,6 +177,7 @@ class WAL:
             else:
                 on_put(
                     key,
+                    value,
                     KeyDirEntry(
                         segment=int(Path(file.name).stem),
                         offset=value_offset,
@@ -186,7 +187,7 @@ class WAL:
 
     def replay(
         self,
-        on_put: Callable[[bytes, KeyDirEntry], None],
+        on_put: Callable[[bytes, bytes, KeyDirEntry], None],
         on_delete: Callable[[bytes], None],
     ) -> bytes | None:
         for file in sorted(

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-29
+
+```
+READ : p50=    5.04 us | p95=  317.68 us | p99= 1716.83 us | p99.9= 2669.79 us | max= 4715.19 us
+WRITE: p50=   18.62 us | p95=   46.56 us | p99=   63.82 us | p99.9=  222.93 us | max= 4280.50 us
+READ_RANGE: p50= 7629.41 us | p95=44825.62 us | p99=64052.53 us | p99.9=77436.97 us | max=91935.88 us
+WRITE_BATCH: p50=   76.77 us | p95=  141.70 us | p99=  208.56 us | p99.9=  559.01 us | max= 4579.96 us
+DELETE: p50=   18.38 us | p95=   40.47 us | p99=   54.59 us | p99.9=   73.34 us | max=  172.09 us
+RATE : 834.49 ops/s
+REPLAY: 1326.34 ms (100,162 keys)
+```
+
+### Added
+
+- MemTable implemented as a treap structure
+
+## [0.5.2] - 2026-08-28
+
+```
+READ : p50=   22.12 us | p95= 1437.90 us | p99= 3896.12 us | p99.9= 5817.02 us | max=13858.40 us
+WRITE: p50=    8.01 us | p95=   35.96 us | p99=   47.66 us | p99.9=   68.98 us | max= 1045.03 us
+READ_RANGE: p50=58202.17 us | p95=130206.43 us | p99=154445.15 us | p99.9=208530.98 us | max=250112.51 us
+WRITE_BATCH: p50=   24.86 us | p95=   58.96 us | p99=   80.11 us | p99.9=  223.43 us | max= 4649.33 us
+DELETE: p50=   10.28 us | p95=   31.61 us | p99=   42.41 us | p99.9=   54.82 us | max=  186.41 us
+RATE : 245.03 ops/s
+REPLAY: 1269.80 ms (100,162 keys)
+```
+
+### Added
+
 - Recovery time benchmark
 
 ## [0.5.1] - 2026-08-28

@@ -1,4 +1,5 @@
-from kvstore.keydir import KeyDir, TOMBSTONE_VALUE_SIZE
+from kvstore.memtable import MemTable
+from kvstore.keydir import KeyDir, KeyDirEntry
 from kvstore.wal import WAL
 from kvstore.config import Config
 
@@ -10,9 +11,19 @@ class KVStoreAPI:
             max_wal_size=config.max_wal_size,
         )
         self.keydir = KeyDir(wal_dir=self.wal.wal_dir)
+        self.memtable = MemTable()
+
+        def on_put(key: bytes, value: bytes, entry: KeyDirEntry):
+            self.keydir.add(key, entry)
+            self.memtable.put(key, value)
+
+        def on_delete(key: bytes):
+            self.keydir.delete(key)
+            self.memtable.delete(key)
+
         self.wal.replay(
-            on_put=self.keydir.add,
-            on_delete=self.keydir.delete,
+            on_put=on_put,
+            on_delete=on_delete,
         )
 
     def __enter__(self):
@@ -25,6 +36,7 @@ class KVStoreAPI:
     def put(self, key: bytes, value: bytes):
         entry = self.wal.append(key, value)
         self.keydir.add(key, entry)
+        self.memtable.put(key, value)
 
     def batch_put(self, keys: list[bytes], values: list[bytes]):
         if len(keys) != len(values):
@@ -32,49 +44,16 @@ class KVStoreAPI:
 
         key_dir_entries = self.wal.append_batch(zip(keys, values))
         self.keydir.keydir |= key_dir_entries
+        for key, value in zip(keys, values):
+            self.memtable.put(key, value)
 
     def read(self, key: bytes) -> bytes | None:
-        return self.keydir.get(key)
+        return self.memtable.read(key)
 
     def read_key_range(self, start: bytes, end: bytes):
-        results = {}
-
-        for file in sorted(
-            (path for path in self.wal.wal_dir.glob("*.log") if path.stem.isdigit()),
-            key=lambda path: int(path.stem),
-        ):
-            with file.open("rb") as wal_file:
-                while True:
-                    header = wal_file.read(12)
-
-                    if not header:
-                        break
-
-                    if len(header) < 12:
-                        break
-
-                    key_size = int.from_bytes(header[4:8])
-                    value_size = int.from_bytes(header[8:])
-                    key = wal_file.read(key_size)
-                    value = (
-                        b""
-                        if value_size == TOMBSTONE_VALUE_SIZE
-                        else wal_file.read(value_size)
-                    )
-
-                    if len(key) != key_size or (
-                        value_size != TOMBSTONE_VALUE_SIZE and len(value) != value_size
-                    ):
-                        break
-
-                    if start <= key < end:
-                        if value_size == TOMBSTONE_VALUE_SIZE:
-                            results.pop(key, None)
-                        else:
-                            results[key] = value
-
-        return results
+        return self.memtable.range(start, end)
 
     def delete(self, key: bytes) -> None:
         self.wal.append_tombstone(key)
         self.keydir.delete(key)
+        self.memtable.delete(key)
