@@ -1,0 +1,43 @@
+---
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-ast
+      - id: check-builtin-literals
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-merge-conflict
+        args:
+          - --assume-in-merge
+      - id: check-toml
+      - id: debug-statements
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: name-tests-test
+        args:
+          - --pytest-test-first
+      - id: trailing-whitespace
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.65
+    hooks:
+      - id: ty
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+        args: [--line-length=89]
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: \.(md|toml)$
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [--format, parsable, --strict]
