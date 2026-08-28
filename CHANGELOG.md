@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Recovery time benchmark
 
-## [0.5.0] - 2026-08-18
+## [0.5.1] - 2026-08-28
+
+### Changed
+
+- Moved WAL replay logic from KeyDir to WAL class, it now uses callbacks to register consumers of records
+
+## [0.5.0] - 2026-08-28
 
 ```
 READ : p50=   23.05 us | p95= 1385.03 us | p99= 3656.64 us | p99.9= 5948.48 us | max=10140.88 us
@@ -47,7 +53,10 @@ RATE : 498.60 ops/s
 ### Added
 
 - Naive key range scan of WAL files
-  - **NOTE** The range scans are impacting point reads, likely due to OS page cache eviction
+  - **NOTE** The range scans are impacting point reads, likely due to OS page cache eviction, profiler evidence:
+    > ncalls tottime percall cumtime percall filename:lineno(function)
+    >
+    > 2489 0.010 0.000 0.081 0.000 /var/home/interviews/kvstore/src/kvstore/keydir.py:45(get)
 
 ## [0.3.0] - 2026-08-28
 

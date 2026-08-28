@@ -1,6 +1,6 @@
 from io import BufferedRandom, SEEK_SET
 from os import fsync
-from typing import Iterable
+from typing import Callable, Iterable
 from pathlib import Path
 from zlib import crc32
 
@@ -54,6 +54,9 @@ class WAL:
     def _write_to_wal(
         self, key_size: bytes, value_size: bytes, key: bytes, value: bytes
     ) -> int:
+        if len(value) >= TOMBSTONE_VALUE_SIZE:
+            raise ValueError("value too long")
+
         record_size = self._calculate_record_size(key, value)
         if self._should_rotate_wal(record_size):
             self._rotate()
@@ -121,3 +124,74 @@ class WAL:
 
         self.current.flush()
         fsync(self.current.fileno())
+
+    def _parse_header(self, header: bytes) -> tuple[int, int, bytes]:
+        crc = header[:4]
+        key_size = int.from_bytes(header[4:8])
+        value_size = int.from_bytes(header[8:12])
+
+        return key_size, value_size, crc
+
+    def _is_valid_record(
+        self,
+        header: bytes,
+        key: bytes,
+        value: bytes,
+    ) -> bool:
+        key_size, value_size, crc = self._parse_header(header)
+
+        return (
+            len(header) == 12
+            and key_size > 0
+            and len(key) == key_size
+            and (value_size == TOMBSTONE_VALUE_SIZE or len(value) == value_size)
+            and crc == crc32(header[4:12] + key + value).to_bytes(4)
+        )
+
+    def _read_wal_file_sequentially(
+        self,
+        file: BufferedRandom,
+        on_put: Callable[[bytes, KeyDirEntry], None],
+        on_delete: Callable[[bytes], None],
+    ):
+        file.seek(0, SEEK_SET)
+
+        while True:
+            pos = file.tell()
+            header = file.read(12)
+
+            if not header:
+                break
+
+            key_size, value_size, _crc = self._parse_header(header)
+            key = file.read(key_size)
+            value_offset = file.tell()
+            value = b"" if value_size == TOMBSTONE_VALUE_SIZE else file.read(value_size)
+
+            if not self._is_valid_record(header, key, value):
+                file.truncate(pos)
+                break
+
+            if value_size == TOMBSTONE_VALUE_SIZE:
+                on_delete(key)
+            else:
+                on_put(
+                    key,
+                    KeyDirEntry(
+                        segment=int(Path(file.name).stem),
+                        offset=value_offset,
+                        value_size=value_size,
+                    ),
+                )
+
+    def replay(
+        self,
+        on_put: Callable[[bytes, KeyDirEntry], None],
+        on_delete: Callable[[bytes], None],
+    ) -> bytes | None:
+        for file in sorted(
+            (path for path in Path(self.wal_dir).glob("*.log") if path.stem.isdigit()),
+            key=lambda path: int(path.stem),
+        ):
+            with file.open("r+b") as wal_file:
+                self._read_wal_file_sequentially(wal_file, on_put, on_delete)

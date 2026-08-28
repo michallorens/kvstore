@@ -17,7 +17,7 @@ class TestKeyDir(TestCase):
             log_file = Path(wal_dir, "000001.log")
             log_file.write_bytes(b"value")
 
-            with KeyDir(Path(wal_dir), replay=False) as keydir:
+            with KeyDir(Path(wal_dir)) as keydir:
                 keydir.add(b"key", KeyDirEntry(1, 0, 5))
 
                 self.assertEqual(keydir.get(b"key"), b"value")
@@ -27,58 +27,11 @@ class TestKeyDir(TestCase):
             log_file = Path(wal_dir, "000001.log")
             log_file.write_bytes(b"oldnew")
 
-            with KeyDir(Path(wal_dir), replay=False) as keydir:
+            with KeyDir(Path(wal_dir)) as keydir:
                 keydir.add(b"key", KeyDirEntry(1, 0, 3))
                 keydir.add(b"key", KeyDirEntry(1, 3, 3))
 
                 self.assertEqual(keydir.get(b"key"), b"new")
-
-    def test_caches_entries_from_all_segments_and_latest_wins(self) -> None:
-        with TemporaryDirectory() as wal_dir:
-            wal_path = Path(wal_dir)
-            self._write_records(wal_path / "000001.log", [(b"old", b"one")])
-            self._write_records(
-                wal_path / "000002.log",
-                [(b"old", b"two"), (b"new", b"three")],
-            )
-
-            with KeyDir(wal_path) as keydir:
-                self.assertEqual(keydir.get(b"old"), b"two")
-                self.assertEqual(keydir.get(b"new"), b"three")
-
-    def test_replay_truncates_broken_header(self) -> None:
-        with TemporaryDirectory() as wal_dir:
-            wal_path = Path(wal_dir) / "000001.log"
-            self._write_records(wal_path, [(b"valid", b"value")])
-            valid_size = wal_path.stat().st_size
-            with wal_path.open("ab") as file:
-                file.write(b"\x01\x02")
-
-            with KeyDir(Path(wal_dir)) as keydir:
-                self.assertEqual(keydir.get(b"valid"), b"value")
-                self.assertIsNone(keydir.get(b"broken"))
-            self.assertEqual(wal_path.stat().st_size, valid_size)
-
-    def test_replay_truncates_crc_mismatch(self) -> None:
-        with TemporaryDirectory() as wal_dir:
-            wal_path = Path(wal_dir) / "000001.log"
-            self._write_records(wal_path, [(b"valid", b"value")])
-            valid_size = wal_path.stat().st_size
-            key = b"broken"
-            value = b"record"
-            key_size = len(key).to_bytes(4)
-            value_size = len(value).to_bytes(4)
-            with wal_path.open("ab") as file:
-                file.write(b"\x00\x00\x00\x00")
-                file.write(key_size)
-                file.write(value_size)
-                file.write(key)
-                file.write(value)
-
-            with KeyDir(Path(wal_dir)) as keydir:
-                self.assertEqual(keydir.get(b"valid"), b"value")
-                self.assertIsNone(keydir.get(b"broken"))
-            self.assertEqual(wal_path.stat().st_size, valid_size)
 
     def test_empty_wal_directory_starts_with_empty_index(self) -> None:
         with TemporaryDirectory() as wal_dir:

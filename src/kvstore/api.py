@@ -10,6 +10,10 @@ class KVStoreAPI:
             max_wal_size=config.max_wal_size,
         )
         self.keydir = KeyDir(wal_dir=self.wal.wal_dir)
+        self.wal.replay(
+            on_put=self.keydir.add,
+            on_delete=self.keydir.delete,
+        )
 
     def __enter__(self):
         return self
