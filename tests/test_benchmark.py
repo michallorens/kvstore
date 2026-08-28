@@ -34,6 +34,8 @@ def format_latency_stats(latencies: list[int]) -> str:
 def print_stats(
     read_latencies: list[int],
     range_read_latencies: list[int],
+    batch_put_latencies: list[int],
+    delete_latencies: list[int],
     write_latencies: list[int],
     operations: int,
     elapsed_ns: int,
@@ -41,10 +43,12 @@ def print_stats(
     throughput = operations / (elapsed_ns / 1_000_000_000)
 
     sys.stdout.write(
-        "\033[4A"
+        "\033[6A"
         f"\rREAD : {format_latency_stats(read_latencies)}\n"
         f"\rWRITE: {format_latency_stats(write_latencies)}\n"
         f"\rREAD_RANGE: {format_latency_stats(range_read_latencies)}\n"
+        f"\rWRITE_BATCH: {format_latency_stats(batch_put_latencies)}\n"
+        f"\rDELETE: {format_latency_stats(delete_latencies)}\n"
         f"\rRATE : {throughput:,.2f} ops/s                \n"
     )
     sys.stdout.flush()
@@ -65,20 +69,24 @@ class TestKVStoreBenchmark(TestCase):
 
             read_latencies: list[int] = []
             range_read_latencies: list[int] = []
+            batch_put_latencies: list[int] = []
+            delete_latencies: list[int] = []
             write_latencies: list[int] = []
 
             operations = MAX_OPS
 
             print("READ")
-            print("WRITE")
             print("READ_RANGE")
+            print("BATCH_PUT")
+            print("DELETE")
+            print("WRITE")
             print("RATE : starting...")
 
             start = time.perf_counter_ns()
 
             for i in range(operations):
                 operation_type = rng.random()
-                if not keys or operation_type < 0.65:
+                if not keys or operation_type < 0.55:
                     key = rng.randbytes(16)
                     value = rng.randbytes(128)
 
@@ -90,6 +98,32 @@ class TestKVStoreBenchmark(TestCase):
 
                     keys.append(key)
                     values[key] = value
+
+                elif operation_type < 0.65:
+                    batch = [
+                        (rng.randbytes(16), rng.randbytes(128))
+                        for _ in range(rng.randint(2, 8))
+                    ]
+                    batch_keys, batch_values = zip(*batch)
+
+                    operation_start = time.perf_counter_ns()
+                    kvstore.batch_put(list(batch_keys), list(batch_values))
+                    elapsed = time.perf_counter_ns() - operation_start
+
+                    batch_put_latencies.append(elapsed)
+                    keys.extend(batch_keys)
+                    values.update(batch)
+
+                elif operation_type < 0.70:
+                    key = rng.choice(keys)
+
+                    operation_start = time.perf_counter_ns()
+                    kvstore.delete(key)
+                    elapsed = time.perf_counter_ns() - operation_start
+
+                    delete_latencies.append(elapsed)
+                    keys.remove(key)
+                    del values[key]
 
                 elif operation_type < 0.95:
                     key = rng.choice(keys)
@@ -124,6 +158,8 @@ class TestKVStoreBenchmark(TestCase):
                     print_stats(
                         read_latencies,
                         range_read_latencies,
+                        batch_put_latencies,
+                        delete_latencies,
                         write_latencies,
                         i + 1,
                         elapsed,

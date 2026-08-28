@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Recovery time benchmark
+
+## [0.5.0] - 2026-08-18
+
+```
+READ : p50=   23.05 us | p95= 1385.03 us | p99= 3656.64 us | p99.9= 5948.48 us | max=10140.88 us
+WRITE: p50=    8.06 us | p95=   35.60 us | p99=   50.13 us | p99.9=   76.18 us | max= 1115.10 us
+READ_RANGE: p50=61584.01 us | p95=156128.86 us | p99=198229.70 us | p99.9=316520.53 us | max=479077.60 us
+WRITE_BATCH: p50=   25.01 us | p95=   58.45 us | p99=   84.11 us | p99.9=  217.25 us | max= 4578.37 us
+DELETE: p50=   10.03 us | p95=   32.28 us | p99=   43.85 us | p99.9=   63.93 us | max=  106.25 us
+RATE : 242.69 ops/s
+```
+
+### Added
+
+- Batched writes
+- Deleting records using tombstones
+- Fsync after flush to prevent data loss on crash
+  - **NOTE** Observed no significant impact on write performance
+
+### Changed
+
+- Cleaned up WAL implementation
+
+### Fixed
+
+- Writing a record using a single write call
+
 ## [0.4.0] - 2026-08-28
 
 ```

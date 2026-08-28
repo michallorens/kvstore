@@ -3,6 +3,8 @@ from io import BufferedRandom, BufferedReader, SEEK_SET
 from pathlib import Path
 from zlib import crc32
 
+TOMBSTONE_VALUE_SIZE = (1 << 32) - 1
+
 
 @dataclass
 class KeyDirEntry:
@@ -52,6 +54,9 @@ class KeyDir:
     def add(self, key: bytes, entry: KeyDirEntry):
         self.keydir[key] = entry
 
+    def delete(self, key: bytes):
+        self.keydir.pop(key)
+
     def _cache_wal_file_entries(self, file: BufferedRandom):
         file.seek(0, SEEK_SET)
 
@@ -70,27 +75,30 @@ class KeyDir:
             key_size = int.from_bytes(header[4:8])
             value_size = int.from_bytes(header[8:])
 
-            if not key_size or not value_size:
+            if not key_size:
                 file.truncate(pos)
                 break
 
             key = file.read(key_size)
             offset = file.tell()
-            value = file.read(value_size)
+            value = b"" if value_size == TOMBSTONE_VALUE_SIZE else file.read(value_size)
 
             if (
                 len(key) != key_size
-                or len(value) != value_size
+                or (value_size != TOMBSTONE_VALUE_SIZE and len(value) != value_size)
                 or crc != crc32(header[4:12] + key + value).to_bytes(4)
             ):
                 file.truncate(pos)
                 break
 
-            self.keydir[key] = KeyDirEntry(
-                segment=int(Path(file.name).stem),
-                offset=offset,
-                value_size=value_size,
-            )
+            if value_size == TOMBSTONE_VALUE_SIZE:
+                self.keydir.pop(key, None)
+            else:
+                self.keydir[key] = KeyDirEntry(
+                    segment=int(Path(file.name).stem),
+                    offset=offset,
+                    value_size=value_size,
+                )
 
     def _cache_wal_files(self) -> bytes | None:
         log_files = sorted(

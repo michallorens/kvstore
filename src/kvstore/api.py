@@ -1,4 +1,4 @@
-from kvstore.keydir import KeyDir
+from kvstore.keydir import KeyDir, TOMBSTONE_VALUE_SIZE
 from kvstore.wal import WAL
 from kvstore.config import Config
 
@@ -21,6 +21,13 @@ class KVStoreAPI:
     def put(self, key: bytes, value: bytes):
         entry = self.wal.append(key, value)
         self.keydir.add(key, entry)
+
+    def batch_put(self, keys: list[bytes], values: list[bytes]):
+        if len(keys) != len(values):
+            raise ValueError("keys and values must have the same length!")
+
+        key_dir_entries = self.wal.append_batch(zip(keys, values))
+        self.keydir.keydir |= key_dir_entries
 
     def read(self, key: bytes) -> bytes | None:
         return self.keydir.get(key)
@@ -45,15 +52,25 @@ class KVStoreAPI:
                     key_size = int.from_bytes(header[4:8])
                     value_size = int.from_bytes(header[8:])
                     key = wal_file.read(key_size)
-                    value = wal_file.read(value_size)
+                    value = (
+                        b""
+                        if value_size == TOMBSTONE_VALUE_SIZE
+                        else wal_file.read(value_size)
+                    )
 
-                    if len(key) != key_size or len(value) != value_size:
+                    if len(key) != key_size or (
+                        value_size != TOMBSTONE_VALUE_SIZE and len(value) != value_size
+                    ):
                         break
 
                     if start <= key < end:
-                        results[key] = value
+                        if value_size == TOMBSTONE_VALUE_SIZE:
+                            results.pop(key, None)
+                        else:
+                            results[key] = value
 
         return results
 
     def delete(self, key: bytes) -> None:
-        self.wal.append(key, b"")
+        self.wal.append_tombstone(key)
+        self.keydir.delete(key)
