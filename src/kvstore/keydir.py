@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-from io import BufferedReader, SEEK_CUR, SEEK_SET
+from io import BufferedRandom, BufferedReader, SEEK_SET
 from pathlib import Path
+from zlib import crc32
 
 
 @dataclass
@@ -14,11 +15,12 @@ class KeyDir:
     keydir: dict[bytes, KeyDirEntry]
     wal_files: dict[str, BufferedReader]
 
-    def __init__(self, wal_dir: Path):
+    def __init__(self, wal_dir: Path, replay: bool = True):
         self.keydir = {}
         self.wal_files = {}
         self.wal_dir = wal_dir
-        self._cache_wal_files()
+        if replay:
+            self._cache_wal_files()
 
     def __enter__(self):
         return self
@@ -50,24 +52,44 @@ class KeyDir:
     def add(self, key: bytes, entry: KeyDirEntry):
         self.keydir[key] = entry
 
-    def _cache_wal_file_entries(self, file: BufferedReader):
+    def _cache_wal_file_entries(self, file: BufferedRandom):
         file.seek(0, SEEK_SET)
 
         while True:
-            key_size = int.from_bytes(file.read(4))
-            value_size = int.from_bytes(file.read(4))
+            pos = file.tell()
+            header = file.read(12)
+
+            if not header:
+                break
+
+            if len(header) < 12:
+                file.truncate(pos)
+                break
+
+            crc = header[:4]
+            key_size = int.from_bytes(header[4:8])
+            value_size = int.from_bytes(header[8:])
 
             if not key_size or not value_size:
                 break
 
             key = file.read(key_size)
+            offset = file.tell()
+            value = file.read(value_size)
+
+            if (
+                len(key) != key_size
+                or len(value) != value_size
+                or crc != crc32(header[4:12] + key + value).to_bytes(4)
+            ):
+                file.truncate(pos)
+                break
+
             self.keydir[key] = KeyDirEntry(
                 segment=int(Path(file.name).stem),
-                offset=file.tell(),
+                offset=offset,
                 value_size=value_size,
             )
-
-            file.seek(value_size, SEEK_CUR)
 
     def _cache_wal_files(self) -> bytes | None:
         log_files = sorted(
@@ -76,5 +98,5 @@ class KeyDir:
         )
 
         for log_file in log_files:
-            with log_file.open("rb") as file:
+            with log_file.open("r+b") as file:
                 self._cache_wal_file_entries(file)

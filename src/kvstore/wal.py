@@ -1,5 +1,6 @@
 from io import BufferedRandom, SEEK_SET
 from pathlib import Path
+from zlib import crc32
 
 from kvstore.keydir import KeyDirEntry
 
@@ -17,7 +18,7 @@ class WAL:
         self.current_size = self.current.seek(0, SEEK_SET)
 
     def append(self, key: bytes, value: bytes) -> KeyDirEntry:
-        record_size = len(key) + len(value) + 8
+        record_size = len(key) + len(value) + 12
         if (
             self.max_wal_size is not None
             and self.current_size > 0
@@ -25,8 +26,13 @@ class WAL:
         ):
             self._rotate()
 
-        self.current.write(len(key).to_bytes(4))
-        self.current.write(len(value).to_bytes(4))
+        key_size = len(key).to_bytes(4)
+        value_size = len(value).to_bytes(4)
+        crc = crc32(key_size + value_size + key + value).to_bytes(4)
+
+        self.current.write(crc)
+        self.current.write(key_size)
+        self.current.write(value_size)
         self.current.write(key)
 
         offset = self.current.tell()

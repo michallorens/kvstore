@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-28
+
+```
+READ : p50=   13.41 us | p95=   26.48 us | p99=   36.05 us | p99.9=  126.75 us | max= 2962.91 us
+WRITE: p50=    5.94 us | p95=   11.71 us | p99=   16.88 us | p99.9=   30.84 us | max= 2012.38 us
+RATE : 20,753.20 ops/s
+```
+
+### Added
+
+- Torn-write recovery using a CRC checksum
+
 ## [0.2.2] - 2026-08-28
 
 ```
