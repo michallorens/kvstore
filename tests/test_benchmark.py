@@ -1,6 +1,7 @@
 import random
 import sys
 import time
+import resource
 
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -12,6 +13,8 @@ from kvstore.wal import WAL
 
 
 MAX_OPS = 100_000
+
+resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))
 
 
 def percentile(values: list[int], p: float) -> float:
