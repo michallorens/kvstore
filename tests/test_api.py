@@ -23,6 +23,14 @@ class TestAPI(TestCase):
                 self.assertEqual(store.read(b"old"), b"two")
                 self.assertEqual(store.read(b"new"), b"three")
 
+    def test_batch_put_updates_memtable(self) -> None:
+        with TemporaryDirectory() as wal_dir:
+            with KVStoreAPI(Config(wal_dir=wal_dir)) as store:
+                store.batch_put([b"a", b"b"], [b"one", b"two"])
+
+                self.assertEqual(store.read(b"a"), b"one")
+                self.assertEqual(store.read(b"b"), b"two")
+
     def test_replay_truncates_broken_header(self) -> None:
         with TemporaryDirectory() as wal_dir:
             wal = WAL(wal_dir)

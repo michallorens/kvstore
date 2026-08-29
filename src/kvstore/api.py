@@ -48,7 +48,7 @@ class KVStoreAPI:
             raise ValueError("keys and values must have the same length!")
 
         with self._lock:
-            records = (Record(k, v) for k, v in zip(keys, values))
+            records = [Record(k, v) for k, v in zip(keys, values)]
             self.wal.append_batch(records)
             for record in records:
                 self.memtable.put(record)

@@ -8,6 +8,8 @@ from unittest import TestCase
 
 from kvstore import KVStoreAPI
 from kvstore.config import Config
+from kvstore.wal import WAL
+from kvstore.memtable import MemTable
 
 
 MAX_OPS = 100_000
@@ -177,21 +179,13 @@ class TestKVStoreBenchmark(TestCase):
 
             kvstore.wal.current.flush()
             kvstore.wal.current.close()
-            kvstore.keydir.close()
 
-            # replay_wal = WAL(wal_dir=wal_dir)
-            # replay_keydir = KeyDir(wal_dir=replay_wal.wal_dir)
-            # replay_start = time.perf_counter_ns()
+            replay_wal = WAL(wal_dir=wal_dir)
+            replay_memtable = MemTable()
+            replay_start = time.perf_counter_ns()
+            replay_wal.replay(on_put=replay_memtable.put)
+            replay_elapsed = time.perf_counter_ns() - replay_start
 
-            # def on_put(record):
-            #     replay_keydir.add(k)
-
-            # replay_wal.replay(on_put=on_put)
-            # replay_elapsed = time.perf_counter_ns() - replay_start
-
-            # print(
-            #     f"REPLAY: {replay_elapsed / 1_000_000:.2f} ms "
-            #     f"({len(replay_keydir.keydir):,} keys)"
-            # )
-            # replay_wal.current.close()
-            # replay_keydir.close()
+            print(f"REPLAY: {replay_elapsed / 1_000_000:.2f} ms")
+            replay_wal.current.close()
+            # replay_memtable.close()
