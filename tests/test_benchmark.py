@@ -8,8 +8,6 @@ from unittest import TestCase
 
 from kvstore import KVStoreAPI
 from kvstore.config import Config
-from kvstore.keydir import KeyDir, KeyDirEntry
-from kvstore.wal import WAL
 
 
 MAX_OPS = 100_000
@@ -181,22 +179,19 @@ class TestKVStoreBenchmark(TestCase):
             kvstore.wal.current.close()
             kvstore.keydir.close()
 
-            replay_wal = WAL(wal_dir=wal_dir)
-            replay_keydir = KeyDir(wal_dir=replay_wal.wal_dir)
-            replay_start = time.perf_counter_ns()
+            # replay_wal = WAL(wal_dir=wal_dir)
+            # replay_keydir = KeyDir(wal_dir=replay_wal.wal_dir)
+            # replay_start = time.perf_counter_ns()
 
-            def on_put(key: bytes, value: bytes, entry: KeyDirEntry):
-                replay_keydir.add(key, entry)
+            # def on_put(record):
+            #     replay_keydir.add(k)
 
-            replay_wal.replay(
-                on_put=on_put,
-                on_delete=replay_keydir.delete,
-            )
-            replay_elapsed = time.perf_counter_ns() - replay_start
+            # replay_wal.replay(on_put=on_put)
+            # replay_elapsed = time.perf_counter_ns() - replay_start
 
-            print(
-                f"REPLAY: {replay_elapsed / 1_000_000:.2f} ms "
-                f"({len(replay_keydir.keydir):,} keys)"
-            )
-            replay_wal.current.close()
-            replay_keydir.close()
+            # print(
+            #     f"REPLAY: {replay_elapsed / 1_000_000:.2f} ms "
+            #     f"({len(replay_keydir.keydir):,} keys)"
+            # )
+            # replay_wal.current.close()
+            # replay_keydir.close()

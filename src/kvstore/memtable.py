@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 import random
 
+from kvstore.record import Record, TOMBSTONE
 
-_TOMBSTONE = object()
+NOT_FOUND = object()
 
 
 @dataclass
@@ -17,42 +18,43 @@ class _Node:
 class MemTable:
     def __init__(self, seed: int | None = None) -> None:
         self.root: _Node | None = None
+        self._frozen: bool = False
         self._random = random.Random(seed)
 
-    def put(self, key: bytes, value: bytes) -> None:
-        self.root = self._insert(self.root, key, value)
+    def put(self, record: Record) -> None:
+        if self._frozen:
+            raise RuntimeError("memtable is frozen")
 
-    def delete(self, key: bytes) -> None:
-        self.root = self._insert(self.root, key, _TOMBSTONE)
+        self.root = self._insert(self.root, record)
 
-    def read(self, key: bytes) -> bytes | None:
+    def read(self, key: bytes) -> bytes | object | None:
         node = self.root
         while node is not None:
             if key == node.key:
-                if node.value is _TOMBSTONE:
+                if node.value is TOMBSTONE:
                     return None
-                return node.value  # ty: ignore
+                return node.value
             node = node.left if key < node.key else node.right
-        return None
+        return NOT_FOUND
 
     def range(self, start: bytes, end: bytes) -> dict[bytes, bytes]:
         result: dict[bytes, bytes] = {}
         self._collect(self.root, start, end, result)
         return result
 
-    def _insert(self, node: _Node | None, key: bytes, value: bytes | object) -> _Node:
+    def _insert(self, node: _Node | None, record: Record) -> _Node:
         if node is None:
-            return _Node(key, value, self._random.random())
+            return _Node(record.key, record.value, self._random.random())
 
-        if key == node.key:
-            node.value = value
+        if record.key == node.key:
+            node.value = record.value
             return node
-        if key < node.key:
-            node.left = self._insert(node.left, key, value)
+        if record.key < node.key:
+            node.left = self._insert(node.left, record)
             if node.left.priority < node.priority:
                 return self._rotate_right(node)
         else:
-            node.right = self._insert(node.right, key, value)
+            node.right = self._insert(node.right, record)
             if node.right.priority < node.priority:
                 return self._rotate_left(node)
         return node
@@ -84,7 +86,12 @@ class MemTable:
             return
         if node.key >= start:
             self._collect(node.left, start, end, result)
-        if start <= node.key < end and node.value is not _TOMBSTONE:
-            result[node.key] = node.value  # ty: ignore
+        if start <= node.key < end:
+            result[node.key] = (
+                None if node.value is TOMBSTONE else node.value  # ty: ignore
+            )
         if node.key < end:
             self._collect(node.right, start, end, result)
+
+    def freeze(self) -> None:
+        self._frozen = True

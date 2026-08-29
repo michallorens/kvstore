@@ -5,6 +5,7 @@ from unittest import TestCase
 from kvstore.api import KVStoreAPI
 from kvstore.config import Config
 from kvstore.wal import WAL
+from kvstore.record import Record
 
 
 class TestAPI(TestCase):
@@ -12,9 +13,9 @@ class TestAPI(TestCase):
         with TemporaryDirectory() as wal_dir:
             wal = WAL(wal_dir, max_wal_size=18)
             try:
-                wal.append(b"old", b"one")
-                wal.append(b"old", b"two")
-                wal.append(b"new", b"three")
+                wal.append(Record(b"old", b"one"))
+                wal.append(Record(b"old", b"two"))
+                wal.append(Record(b"new", b"three"))
             finally:
                 wal.current.close()
 
@@ -26,7 +27,7 @@ class TestAPI(TestCase):
         with TemporaryDirectory() as wal_dir:
             wal = WAL(wal_dir)
             try:
-                wal.append(b"valid", b"value")
+                wal.append(Record(b"valid", b"value"))
             finally:
                 wal.current.close()
 
@@ -44,8 +45,8 @@ class TestAPI(TestCase):
         with TemporaryDirectory() as wal_dir:
             wal = WAL(wal_dir)
             try:
-                wal.append(b"valid", b"value")
-                wal.append(b"broken", b"record")
+                wal.append(Record(b"valid", b"value"))
+                wal.append(Record(b"broken", b"record"))
             finally:
                 wal.current.close()
 
