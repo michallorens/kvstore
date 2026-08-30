@@ -3,7 +3,7 @@ import os
 
 class Config:
     DEFAULT_WAL_DIR = "wal"
-    DEFAULT_MAX_WAL_SIZE = 1024 * 1024
+    DEFAULT_MAX_WAL_SIZE = 64 * 1024 * 1024
     wal_dir: str
     max_wal_size: int
 

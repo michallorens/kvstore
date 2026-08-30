@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-30
+
+```
+READ : p50=    5.71 us | p95=   25.78 us | p99=  148.05 us | p99.9=  262.70 us | max=  561.99 us568.26 us
+WRITE: p50=   16.82 us | p95=   44.91 us | p99=   58.40 us | p99.9=   86.02 us | max= 1193.14 us1814.54 us
+READ_RANGE_10: p50=   34.05 us | p95=   60.91 us | p99=  253.37 us | p99.9=  324.08 us | max=  487.18 us us
+READ_RANGE_100: p50=  108.22 us | p95=  181.81 us | p99=  345.43 us | p99.9=  476.74 us | max=  568.26 us
+READ_RANGE_1000: p50=  786.37 us | p95= 1049.35 us | p99= 1390.56 us | p99.9= 1672.96 us | max= 1814.54 us
+READ_RANGE_10000: p50= 8167.65 us | p95=10636.90 us | p99=12700.51 us | p99.9=19134.07 us | max=20413.37 us
+WRITE_BATCH: p50=   67.40 us | p95=  127.41 us | p99=  186.30 us | p99.9= 1835.39 us | max=10468.75 us
+DELETE: p50=   16.01 us | p95=   41.42 us | p99=   53.23 us | p99.9=   76.26 us | max=  475.58 us
+RATE : 731.56 ops/s
+```
+
+### Added
+
+- Sparse indexes to speed up lookup in SSTables, indexes are persisted alongside SSTables as .hint files
+  as to not impact the replay/recovery time
+
+## [0.8.0] - 2026-08-30
+
+```
+READ : p50=    7.77 us | p95=   44.69 us | p99=  222.59 us | p99.9=  500.58 us | max= 2263.26 us593.26 us
+WRITE: p50=   22.25 us | p95=   62.56 us | p99=  114.44 us | p99.9=  198.07 us | max= 8280.44 us5937.46 us
+READ_RANGE_10: p50=   40.30 us | p95=  107.25 us | p99=  307.99 us | p99.9=  550.56 us | max=  889.14 us us
+READ_RANGE_100: p50=  135.47 us | p95=  342.30 us | p99=  560.45 us | p99.9=  869.08 us | max= 1593.26 us
+READ_RANGE_1000: p50= 1027.29 us | p95= 2252.69 us | p99= 3405.28 us | p99.9= 5048.30 us | max= 5937.46 us
+READ_RANGE_10000: p50=10658.42 us | p95=23216.20 us | p99=33794.60 us | p99.9=42819.12 us | max=49853.54 us
+WRITE_BATCH: p50=   92.40 us | p95=  236.94 us | p99=  428.85 us | p99.9= 2485.49 us | max= 8366.80 us
+DELETE: p50=   20.83 us | p95=   55.11 us | p99=  105.18 us | p99.9=  181.03 us | max=  994.29 us
+RATE : 461.60 ops/s
+```
+
+### Added
+
+- SSTables to flush MemTables to disk, triggered whenever WAL log rotates for simplicity but also to
+  be able to easily check WAL/SSTable integrity
+- Flushing the SSTable is currently performed synchronously and can be seen impacting the write speed
+
+### Changed
+
+- Benchmark to profile range reads separately for reads of 10 to 10000 records
+- Max WAL size to 64MB
+
 ## [0.7.0] - 2026-08-29
 
 ### Added

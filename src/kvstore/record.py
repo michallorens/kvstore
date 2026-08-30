@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from io import BufferedRandom
+from io import BufferedIOBase
 from zlib import crc32
 
 TOMBSTONE = object()
@@ -42,7 +42,7 @@ class Record:
             raise ValueError("record malformed")
 
     @classmethod
-    def from_buffer(cls, file: BufferedRandom) -> "Record":
+    def from_buffer(cls, file: BufferedIOBase) -> "Record":
         header = file.read(12)
 
         if not header:

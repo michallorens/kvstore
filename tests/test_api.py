@@ -6,6 +6,7 @@ from kvstore.api import KVStoreAPI
 from kvstore.config import Config
 from kvstore.wal import WAL
 from kvstore.record import Record
+from kvstore.sstable import SSTable
 
 
 class TestAPI(TestCase):
@@ -30,6 +31,20 @@ class TestAPI(TestCase):
 
                 self.assertEqual(store.read(b"a"), b"one")
                 self.assertEqual(store.read(b"b"), b"two")
+
+    def test_sstable_reads_are_repeatable(self) -> None:
+        with TemporaryDirectory() as wal_dir:
+            memtable = KVStoreAPI(Config(wal_dir=wal_dir)).memtable
+            memtable.put(Record(b"a", b"one"))
+            memtable.put(Record(b"b", b"two"))
+
+            sstable = SSTable.from_memtable(memtable, Path(wal_dir) / "000000.sst")
+
+            self.assertEqual(sstable.read(b"a"), b"one")
+            self.assertEqual(sstable.read(b"b"), b"two")
+            self.assertEqual(
+                dict(sstable.range(b"a", b"c")), {b"a": b"one", b"b": b"two"}
+            )
 
     def test_replay_truncates_broken_header(self) -> None:
         with TemporaryDirectory() as wal_dir:

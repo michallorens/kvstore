@@ -14,7 +14,7 @@ from kvstore.memtable import MemTable
 
 MAX_OPS = 100_000
 
-resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))
+resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
 
 
 def percentile(values: list[int], p: float) -> float:
@@ -38,7 +38,7 @@ def format_latency_stats(latencies: list[int]) -> str:
 
 def print_stats(
     read_latencies: list[int],
-    range_read_latencies: list[int],
+    range_read_latencies: dict[int, list[int]],
     batch_put_latencies: list[int],
     delete_latencies: list[int],
     write_latencies: list[int],
@@ -46,12 +46,16 @@ def print_stats(
     elapsed_ns: int,
 ) -> None:
     throughput = operations / (elapsed_ns / 1_000_000_000)
+    range_lines = "\n".join(
+        f"\rREAD_RANGE_{size}: {format_latency_stats(range_read_latencies.get(size, []))}"
+        for size in (10, 100, 1_000, 10_000)
+    )
 
     sys.stdout.write(
         "\033[6A"
         f"\rREAD : {format_latency_stats(read_latencies)}\n"
         f"\rWRITE: {format_latency_stats(write_latencies)}\n"
-        f"\rREAD_RANGE: {format_latency_stats(range_read_latencies)}\n"
+        f"{range_lines}\n"
         f"\rWRITE_BATCH: {format_latency_stats(batch_put_latencies)}\n"
         f"\rDELETE: {format_latency_stats(delete_latencies)}\n"
         f"\rRATE : {throughput:,.2f} ops/s                \n"
@@ -73,7 +77,12 @@ class TestKVStoreBenchmark(TestCase):
             values: dict[bytes, bytes] = {}
 
             read_latencies: list[int] = []
-            range_read_latencies: list[int] = []
+            range_read_latencies: dict[int, list[int]] = {
+                10: [],
+                100: [],
+                1_000: [],
+                10_000: [],
+            }
             batch_put_latencies: list[int] = []
             delete_latencies: list[int] = []
             write_latencies: list[int] = []
@@ -81,7 +90,10 @@ class TestKVStoreBenchmark(TestCase):
             operations = MAX_OPS
 
             print("READ")
-            print("READ_RANGE")
+            print("READ_RANGE_10")
+            print("READ_RANGE_100")
+            print("READ_RANGE_1000")
+            print("READ_RANGE_10000")
             print("BATCH_PUT")
             print("DELETE")
             print("WRITE")
@@ -142,21 +154,33 @@ class TestKVStoreBenchmark(TestCase):
                     self.assertEqual(result, values[key])
 
                 else:
-                    range_start, range_end = sorted((rng.choice(keys), rng.choice(keys)))
+                    target_size = rng.choice((10, 100, 1_000, 10_000))
+                    sorted_keys = sorted(values)
+                    if len(sorted_keys) < 2:
+                        continue
+
+                    max_size = min(target_size, len(sorted_keys))
+                    start_index = rng.randrange(0, len(sorted_keys) - max_size + 1)
+                    end_index = start_index + max_size
+                    range_start = sorted_keys[start_index]
+                    range_end = (
+                        sorted_keys[end_index]
+                        if end_index < len(sorted_keys)
+                        else b"\xff" * len(sorted_keys[-1])
+                    )
+
                     operation_start = time.perf_counter_ns()
                     result = kvstore.read_key_range(range_start, range_end)
                     elapsed = time.perf_counter_ns() - operation_start
 
-                    range_read_latencies.append(elapsed)
+                    range_read_latencies[target_size].append(elapsed)
 
-                    self.assertEqual(
-                        result,
-                        {
-                            key: value
-                            for key, value in values.items()
-                            if range_start <= key < range_end
-                        },
-                    )
+                    expected = {
+                        key: value
+                        for key, value in values.items()
+                        if range_start <= key < range_end
+                    }
+                    self.assertEqual(result, expected)
 
                 if (i + 1) % 1_000 == 0:
                     elapsed = time.perf_counter_ns() - start

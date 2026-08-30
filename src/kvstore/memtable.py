@@ -95,3 +95,18 @@ class MemTable:
 
     def freeze(self) -> None:
         self._frozen = True
+
+    def _in_order(self, node: _Node | None):
+        if node is None:
+            return
+
+        yield from self._in_order(node.left)
+        yield (
+            Record.tombstone(node.key)
+            if node.value is TOMBSTONE
+            else Record(node.key, node.value)
+        )
+        yield from self._in_order(node.right)
+
+    def records(self):
+        yield from self._in_order(self.root)

@@ -1,16 +1,19 @@
 from collections import deque
 from threading import RLock
+from pathlib import Path
 
 from kvstore.memtable import MemTable, NOT_FOUND
 from kvstore.wal import WAL
 from kvstore.config import Config
 from kvstore.record import Record
+from kvstore.sstable import SSTable
 
 
 class KVStoreAPI:
     def __init__(self, config: Config = Config()) -> None:
         self._lock = RLock()
         self.memtable = MemTable()
+        self.sstables: deque[SSTable] = deque()
         self.frozen_memtables: deque[MemTable] = deque()
 
         def on_wal_rotate(segment: int) -> None:
@@ -20,7 +23,11 @@ class KVStoreAPI:
                 self.memtable = MemTable()
                 self.frozen_memtables.append(frozen)
 
-            # TODO schedule flush
+            sstable = SSTable.from_memtable(
+                frozen, Path(config.wal_dir) / f"{segment:06d}.sst"
+            )
+            self.sstables.append(sstable)
+            self.frozen_memtables.popleft()
 
         self.wal = WAL(
             wal_dir=config.wal_dir,
@@ -35,6 +42,8 @@ class KVStoreAPI:
 
     def __exit__(self, exc_type, exc, tb):
         self.wal.current.close()
+        for sstable in self.sstables:
+            sstable.close()
 
     def put(self, key: bytes, value: bytes):
         record = Record(key, value)
@@ -53,12 +62,12 @@ class KVStoreAPI:
             for record in records:
                 self.memtable.put(record)
 
-    def _get_memtables(self) -> list[MemTable]:
+    def _get_tables(self) -> list[MemTable | SSTable]:
         with self._lock:
-            return [*self.frozen_memtables, self.memtable]
+            return [*self.sstables, *self.frozen_memtables, self.memtable]
 
     def read(self, key: bytes) -> bytes | None:
-        for memtable in reversed(self._get_memtables()):
+        for memtable in reversed(self._get_tables()):
             value = memtable.read(key)
 
             if value is not NOT_FOUND:
@@ -69,7 +78,7 @@ class KVStoreAPI:
     def read_key_range(self, start: bytes, end: bytes) -> dict[bytes, bytes]:
         result: dict[bytes, bytes | None] = {}
 
-        for memtable in self._get_memtables():
+        for memtable in self._get_tables():
             result.update(memtable.range(start, end))
 
         return {key: value for key, value in result.items() if value is not None}
