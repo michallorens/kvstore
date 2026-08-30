@@ -190,6 +190,13 @@ The benchmark therefore exposed the expected tradeoff of the current design: wri
 
 Recovery also benefited substantially from persisted SSTables. Instead of replaying the complete historical WAL, startup only needs to replay WAL segments newer than the newest successfully persisted SSTable.
 
+Profiling also identified the MemTable tree traversal as a CPU hot path, with _collect() accounting for a significant portion of CPU time during range reads. This could be a candidate for further optimization, either by improving the underlying tree/range traversal algorithm or, if profiling continued to show it as a bottleneck, by moving the hot path to a lower-level implementation language such as C.
+
+```
+ncalls    tottime  percall  cumtime  percall  filename:lineno(function)
+5066      7.066    0.000    7.066    0.001    /var/home/interviews/kvstore/src/kvstore/memtable.py:78(_collect)
+```
+
 ---
 
 ## 5. AI Usage Notes
