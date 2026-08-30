@@ -4,6 +4,14 @@ Pluggable key-value storage
 
 ## Usage
 
+Install `uv` package manager:
+
+> **NOTE:** This only installs development dependencies such as static analysis tools and linters. The project itself uses only standard Python libraries
+
+```
+pip install uv
+```
+
 Bring up the server:
 
 ```
