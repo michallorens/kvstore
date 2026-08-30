@@ -210,7 +210,7 @@ class TestKVStoreBenchmark(TestCase):
         )
 
         operation_start = time.perf_counter_ns()
-        result = kvstore.read_key_range(range_start, range_end)
+        result = dict(kvstore.read_key_range(range_start, range_end))
         elapsed = time.perf_counter_ns() - operation_start
 
         range_read_latencies.append(elapsed)
