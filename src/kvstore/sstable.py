@@ -1,5 +1,6 @@
 from bisect import bisect_right
 from pathlib import Path
+from typing import Iterator
 
 from kvstore.memtable import MemTable, NOT_FOUND
 from kvstore.record import Record, TOMBSTONE
@@ -8,14 +9,17 @@ from kvstore.record import Record, TOMBSTONE
 class SSTable:
     INDEX_STRIDE = 128
 
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.data = open(path, mode="rb")
         self._load_hints()
 
     @classmethod
     def from_memtable(cls, memtable: MemTable, path: Path | str) -> "SSTable":
-        with open(Path(path), mode="ab") as data, open(Path(f"{path}.hint")) as hint:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path, mode="wb") as data, open(f"{path}.hint", mode="wb") as hint:
             offset = 0
 
             for i, record in enumerate(memtable.records()):
@@ -31,7 +35,7 @@ class SSTable:
 
         return cls(path)
 
-    def _load_hints(self):
+    def _load_hints(self) -> None:
         self.index_keys: list[bytes] = []
         self.index_offsets: list[int] = []
 
@@ -59,8 +63,15 @@ class SSTable:
         pos = bisect_right(self.index_keys, key) - 1
         return self.index_offsets[pos] if pos >= 0 else 0
 
-    def close(self):
-        self.data.close()
+    def close(self) -> None:
+        if not self.data.closed:
+            self.data.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def read(self, key: bytes) -> bytes | None | object:
         self.data.seek(self._find_offset(key))
@@ -74,7 +85,7 @@ class SSTable:
 
         return NOT_FOUND
 
-    def range(self, start: bytes, end: bytes):
+    def range(self, start: bytes, end: bytes) -> Iterator[tuple[bytes, bytes | None]]:
         self.data.seek(self._find_offset(start))
 
         while record := Record.from_buffer(self.data):
@@ -82,4 +93,10 @@ class SSTable:
                 break
 
             if record.key >= start:
-                yield record.key, (None if record.value is TOMBSTONE else record.value)
+                if record.value is TOMBSTONE:
+                    value = None
+                else:
+                    assert isinstance(record.value, bytes)
+                    value = record.value
+
+                yield record.key, value

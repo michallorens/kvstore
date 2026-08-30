@@ -1,4 +1,6 @@
 *.log
+*.sst
+*.hint
 prof
 
 # Byte-compiled / optimized / DLL files

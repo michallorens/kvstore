@@ -4,7 +4,7 @@ from os import fsync
 from typing import Callable, Iterable
 from pathlib import Path
 
-from kvstore.record import Record
+from kvstore.record import Record, TOMBSTONE, TOMBSTONE_VALUE_SIZE
 
 
 class WAL:
@@ -20,16 +20,17 @@ class WAL:
         self.wal_dir = Path(wal_dir)
         self.max_wal_size = max_wal_size
         self.wal_dir.mkdir(parents=True, exist_ok=True)
-        self.current_segment = self._youngest_log_number()
-        self.current = self._open_log(self.current_segment)
-        self.current_size = self.current.seek(0, SEEK_SET)
-        self.on_rotate = on_rotate
+
+        self._current_segment = self._youngest_log_number()
+        self._current = self._open_log(self._current_segment)
+        self._current_size = self._current.seek(0, SEEK_SET)
+        self._on_rotate = on_rotate
 
     def _should_rotate_wal(self, record_size: int) -> bool:
         return (
             self.max_wal_size is not None
-            and self.current_size > 0
-            and self.current_size + record_size > self.max_wal_size
+            and self._current_size > 0
+            and self._current_size + record_size > self.max_wal_size
         )
 
     def _youngest_log_number(self) -> int:
@@ -42,43 +43,45 @@ class WAL:
         return open(self.wal_dir / f"{log_number:06d}.log", mode="a+b")
 
     def _rotate(self) -> None:
-        self.current.flush()
-        fsync(self.current.fileno())
-        self.current.close()
+        self._current.flush()
+        fsync(self._current.fileno())
+        self._current.close()
 
-        if self.on_rotate is not None:
-            self.on_rotate(self.current_segment)
+        if self._on_rotate is not None:
+            self._on_rotate(self._current_segment)
 
-        self.current_segment = self._youngest_log_number() + 1
-        self.current = self._open_log(self.current_segment)
-        self.current_size = self.current.seek(0, SEEK_SET)
+        self._current_segment = self._youngest_log_number() + 1
+        self._current = self._open_log(self._current_segment)
+        self._current_size = self._current.seek(0, SEEK_SET)
 
     def _write_to_wal(self, record: Record) -> None:
-        # if record.value is not TOMBSTONE and len(record.value) >= TOMBSTONE_VALUE_SIZE:
-        #     raise ValueError("value too long")
+        if record.value is not TOMBSTONE:
+            assert isinstance(record.value, bytes)
+            if len(record.value) >= TOMBSTONE_VALUE_SIZE:
+                raise ValueError("value too long")
 
         if self._should_rotate_wal(len(record)):
             self._rotate()
 
-        self.current.write(record.to_bytes())
-        self.current_size += len(record)
+        self._current.write(record.to_bytes())
+        self._current_size += len(record)
 
     def append(self, record: Record) -> None:
         self._write_to_wal(record)
-        self.current.flush()
-        fsync(self.current.fileno())
+        self._current.flush()
+        fsync(self._current.fileno())
 
     def append_batch(self, records: Iterable[Record]) -> None:
         for record in records:
             self._write_to_wal(record)
 
-        self.current.flush()
-        fsync(self.current.fileno())
+        self._current.flush()
+        fsync(self._current.fileno())
 
     def _read_wal_file_sequentially(
         self,
         file: BufferedRandom,
-        on_put: Callable[[Record], None],
+        on_read: Callable[[Record], None],
     ):
         file.seek(0, SEEK_SET)
 
@@ -95,12 +98,12 @@ class WAL:
             if not record:
                 break
 
-            on_put(record)
+            on_read(record)
 
-    def replay(self, on_put: Callable[[Record], None]) -> None:
+    def replay(self, on_read: Callable[[Record], None]) -> None:
         for file in sorted(
             (path for path in Path(self.wal_dir).glob("*.log") if path.stem.isdigit()),
             key=lambda path: int(path.stem),
         ):
             with file.open("r+b") as wal_file:
-                self._read_wal_file_sequentially(wal_file, on_put)
+                self._read_wal_file_sequentially(wal_file, on_read)

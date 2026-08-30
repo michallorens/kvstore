@@ -35,13 +35,13 @@ class KVStoreAPI:
             on_rotate=on_wal_rotate,
         )
 
-        self.wal.replay(on_put=self.memtable.put)
+        self.wal.replay(on_read=self.memtable.put)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        self.wal.current.close()
+        self.wal._current.close()
         for sstable in self.sstables:
             sstable.close()
 

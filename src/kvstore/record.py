@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 from io import BufferedIOBase
 from zlib import crc32
 
@@ -18,8 +19,8 @@ class Record:
     @classmethod
     def _parse_header(cls, header: bytes) -> tuple[int, int, bytes]:
         crc = header[:4]
-        key_size = int.from_bytes(header[4:8])
-        value_size = int.from_bytes(header[8:12])
+        key_size = int.from_bytes(header[4:8], signed=False)
+        value_size = int.from_bytes(header[8:12], signed=False)
 
         return key_size, value_size, crc
 
@@ -34,28 +35,27 @@ class Record:
 
         if not (
             len(header) == 12
-            and key_size > 0
             and len(key) == key_size
             and (value_size == TOMBSTONE_VALUE_SIZE or len(value) == value_size)
-            and crc == crc32(header[4:12] + key + value).to_bytes(4)
+            and crc == crc32(header[4:12] + key + value).to_bytes(4, "big")
         ):
             raise ValueError("record malformed")
 
     @classmethod
-    def from_buffer(cls, file: BufferedIOBase) -> "Record":
-        header = file.read(12)
+    def from_buffer(cls, buffer: BufferedIOBase) -> Optional["Record"]:
+        header = buffer.read(12)
 
         if not header:
-            return  # ty: ignore
+            return
 
         key_size, value_size, _ = cls._parse_header(header)
-        key = file.read(key_size)
+        key = buffer.read(key_size)
 
         if value_size == TOMBSTONE_VALUE_SIZE:
             cls._validate(header, key, b"")
             return cls.tombstone(key)
         else:
-            value = file.read(value_size)
+            value = buffer.read(value_size)
             cls._validate(header, key, value)
             return cls(key, value)
 
@@ -63,10 +63,18 @@ class Record:
         return len(self.key) + len(self._get_value()) + 12
 
     def _get_value(self) -> bytes:
-        return b"" if self.value is TOMBSTONE else self.value  # ty: ignore
+        if self.value is TOMBSTONE:
+            return b""
+
+        assert isinstance(self.value, bytes)
+        return self.value
 
     def _get_value_size(self) -> int:
-        return TOMBSTONE_VALUE_SIZE if self.value is TOMBSTONE else len(self.value)  # ty: ignore
+        if self.value is TOMBSTONE:
+            return TOMBSTONE_VALUE_SIZE
+
+        assert isinstance(self.value, bytes)
+        return len(self.value)
 
     def _get_bytes(self) -> bytes:
         return (

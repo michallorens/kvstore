@@ -18,7 +18,7 @@ class TestAPI(TestCase):
                 wal.append(Record(b"old", b"two"))
                 wal.append(Record(b"new", b"three"))
             finally:
-                wal.current.close()
+                wal._current.close()
 
             with KVStoreAPI(Config(wal_dir=wal_dir, max_wal_size=18)) as store:
                 self.assertEqual(store.read(b"old"), b"two")
@@ -52,7 +52,7 @@ class TestAPI(TestCase):
             try:
                 wal.append(Record(b"valid", b"value"))
             finally:
-                wal.current.close()
+                wal._current.close()
 
             wal_path = Path(wal_dir) / "000000.log"
             valid_size = wal_path.stat().st_size
@@ -71,7 +71,7 @@ class TestAPI(TestCase):
                 wal.append(Record(b"valid", b"value"))
                 wal.append(Record(b"broken", b"record"))
             finally:
-                wal.current.close()
+                wal._current.close()
 
             wal_path = Path(wal_dir) / "000000.log"
             valid_size = 12 + len(b"valid") + len(b"value")
