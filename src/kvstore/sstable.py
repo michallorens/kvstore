@@ -5,6 +5,7 @@ from typing import Iterator
 
 from kvstore.memtable import MemTable, NOT_FOUND
 from kvstore.record import Record, TOMBSTONE
+from kvstore.bloom_filter import BloomFilter
 
 
 class SSTable:
@@ -13,6 +14,7 @@ class SSTable:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.data = open(path, mode="rb")
+        self.bloom = BloomFilter.from_file(self.path.with_suffix(".bloom"))
         self._load_hints()
 
     @classmethod
@@ -22,14 +24,23 @@ class SSTable:
 
         data_tmp = path.with_suffix(".tmp")
         hint_tmp = path.with_suffix(".hint.tmp")
+        bloom_tmp = path.with_suffix(".bloom.tmp")
+
+        bloom_filter = BloomFilter(
+            capacity=len(memtable),
+            false_positive_rate=0.01,
+        )
 
         with (
             data_tmp.open("wb") as data,
             hint_tmp.open("wb") as hint,
+            bloom_tmp.open("wb") as bloom,
         ):
             offset = 0
 
             for i, record in enumerate(memtable.records()):
+                bloom_filter.add(record.key)
+
                 if i % cls.INDEX_STRIDE == 0:
                     hint.write(
                         len(record.key).to_bytes(4, "big")
@@ -42,11 +53,15 @@ class SSTable:
 
             data.flush()
             os.fsync(data.fileno())
+
             hint.flush()
             os.fsync(hint.fileno())
 
+            bloom_filter.write_to(bloom)
+
         os.replace(data_tmp, path)
         os.replace(hint_tmp, path.with_suffix(".hint"))
+        os.replace(bloom_tmp, path.with_suffix(".bloom"))
 
         return cls(path)
 
@@ -89,6 +104,9 @@ class SSTable:
             pass
 
     def read(self, key: bytes) -> bytes | None | object:
+        if not self.bloom.might_contain(key):
+            return NOT_FOUND
+
         self.data.seek(self._find_offset(key))
 
         while record := Record.from_buffer(self.data):

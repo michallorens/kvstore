@@ -20,12 +20,19 @@ class MemTable:
         self.root: _Node | None = None
         self._frozen: bool = False
         self._random = random.Random(seed)
+        self._size = 0
 
     def put(self, record: Record) -> None:
         if self._frozen:
             raise RuntimeError("memtable is frozen")
 
-        self.root = self._insert(self.root, record)
+        self.root, inserted = self._insert(self.root, record)
+
+        if inserted:
+            self._size += 1
+
+    def __len__(self) -> int:
+        return self._size
 
     def read(self, key: bytes) -> bytes | object | None:
         node = self.root
@@ -42,22 +49,25 @@ class MemTable:
         self._collect(self.root, start, end, result)
         return result
 
-    def _insert(self, node: _Node | None, record: Record) -> _Node:
+    def _insert(self, node: _Node | None, record: Record) -> tuple[_Node, bool]:
         if node is None:
-            return _Node(record.key, record.value, self._random.random())
+            return (_Node(record.key, record.value, self._random.random()), True)
 
         if record.key == node.key:
             node.value = record.value
-            return node
+            return node, False
+
         if record.key < node.key:
-            node.left = self._insert(node.left, record)
+            node.left, inserted = self._insert(node.left, record)
             if node.left.priority < node.priority:
-                return self._rotate_right(node)
+                node = self._rotate_right(node)
+
         else:
-            node.right = self._insert(node.right, record)
+            node.right, inserted = self._insert(node.right, record)
             if node.right.priority < node.priority:
-                return self._rotate_left(node)
-        return node
+                node = self._rotate_left(node)
+
+        return node, inserted
 
     @staticmethod
     def _rotate_right(node: _Node) -> _Node:

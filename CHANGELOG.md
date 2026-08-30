@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-30
+
+```
+READ : p50=   33.64 us | p95=  529.37 us | p99=  813.69 us | p99.9= 1379.31 us | max=31103.77 us
+WRITE: p50=   24.53 us | p95=   52.89 us | p99=   77.08 us | p99.9=  640.52 us | max=62276.22 us
+READ_RANGE_1000: p50= 4030.13 us | p95= 6490.36 us | p99= 9389.27 us | p99.9=13090.42 us | max=52149.30 us
+WRITE_BATCH: p50=   88.90 us | p95=  168.49 us | p99=  276.19 us | p99.9=  857.67 us | max=28625.83 us
+DELETE: p50=   24.43 us | p95=   50.65 us | p99=   75.83 us | p99.9=  365.51 us | max=20238.72 us
+RATE : 1,364.02 ops/s
+REPLAY: 489.60 ms
+```
+
+Tail-end latency is still spiky, potentially due to GC or the use of `fsync()`
+
+### Added
+
+- Bloom filters to reduce number of SSTables looked up during `read()`
+
 ## [0.12.0] - 2026-08-30
 
 ```
@@ -113,9 +131,9 @@ REPLAY: 344.13 ms
 ## [0.9.0] - 2026-08-30
 
 ```
-READ : p50=    5.71 us | p95=   25.78 us | p99=  148.05 us | p99.9=  262.70 us | max=  561.99 us568.26 us
-WRITE: p50=   16.82 us | p95=   44.91 us | p99=   58.40 us | p99.9=   86.02 us | max= 1193.14 us1814.54 us
-READ_RANGE_10: p50=   34.05 us | p95=   60.91 us | p99=  253.37 us | p99.9=  324.08 us | max=  487.18 us us
+READ : p50=    5.71 us | p95=   25.78 us | p99=  148.05 us | p99.9=  262.70 us | max=  561.99 us
+WRITE: p50=   16.82 us | p95=   44.91 us | p99=   58.40 us | p99.9=   86.02 us | max= 1193.14 us
+READ_RANGE_10: p50=   34.05 us | p95=   60.91 us | p99=  253.37 us | p99.9=  324.08 us | max=  487.18 us
 READ_RANGE_100: p50=  108.22 us | p95=  181.81 us | p99=  345.43 us | p99.9=  476.74 us | max=  568.26 us
 READ_RANGE_1000: p50=  786.37 us | p95= 1049.35 us | p99= 1390.56 us | p99.9= 1672.96 us | max= 1814.54 us
 READ_RANGE_10000: p50= 8167.65 us | p95=10636.90 us | p99=12700.51 us | p99.9=19134.07 us | max=20413.37 us
@@ -132,8 +150,8 @@ RATE : 731.56 ops/s
 ## [0.8.0] - 2026-08-30
 
 ```
-READ : p50=    7.77 us | p95=   44.69 us | p99=  222.59 us | p99.9=  500.58 us | max= 2263.26 us593.26 us
-WRITE: p50=   22.25 us | p95=   62.56 us | p99=  114.44 us | p99.9=  198.07 us | max= 8280.44 us5937.46 us
+READ : p50=    7.77 us | p95=   44.69 us | p99=  222.59 us | p99.9=  500.58 us | max= 2263.26 us
+WRITE: p50=   22.25 us | p95=   62.56 us | p99=  114.44 us | p99.9=  198.07 us | max= 8280.44 us
 READ_RANGE_10: p50=   40.30 us | p95=  107.25 us | p99=  307.99 us | p99.9=  550.56 us | max=  889.14 us us
 READ_RANGE_100: p50=  135.47 us | p95=  342.30 us | p99=  560.45 us | p99.9=  869.08 us | max= 1593.26 us
 READ_RANGE_1000: p50= 1027.29 us | p95= 2252.69 us | p99= 3405.28 us | p99.9= 5048.30 us | max= 5937.46 us

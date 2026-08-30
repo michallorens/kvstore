@@ -14,11 +14,11 @@ The WAL is responsible for:
 - providing the durability boundary for acknowledged writes;
 - being the source of truth for recovering state after a crash.
 
-Appending a record is an *O(1)* operation with respect to the number of stored records.
+Appending a record is an _O(1)_ operation with respect to the number of stored records.
 
-Durability is enforced by *fsync()* after each single write operation or after successfully writing a batch. Batch writes are not treated as atomic transactions: an interrupted batch may contain a prefix of its records in the WAL, while checksums allow recovery to detect and truncate a partially written final record. An acknowledged batch is only returned after the complete batch has been persisted and *fsync()* has completed.
+Durability is enforced by _fsync()_ after each single write operation or after successfully writing a batch. Batch writes are not treated as atomic transactions: an interrupted batch may contain a prefix of its records in the WAL, while checksums allow recovery to detect and truncate a partially written final record. An acknowledged batch is only returned after the complete batch has been persisted and _fsync()_ has completed.
 
-The system calculates a checksum for each record written, which enables detection of *torn-writes* during recovery and truncating the log after the last correct write.
+The system calculates a checksum for each record written, which enables detection of _torn-writes_ during recovery and truncating the log after the last correct write.
 
 The WAL is segmented. Segment rotation is used to trigger MemTable flush, simplifying the relationship between the on-disk and in-memory state.
 
@@ -29,10 +29,13 @@ Low-latency reads are achieved through a combination of:
 - **MemTable** - holds the current mutable in-memory state and serves read requests of newest records directly.
 - **SSTables** - provide immutable on-disk storage for data that no longer fits in memory.
 - **Sparse SSTable hint index** - provides efficient lookup within individual SSTables without requiring a full in-memory index.
+- **Bloom filters** - help eliminate lookup of some SSTables during point read
 
 The MemTable acts as the active in-memory representation of the most recent state, while SSTables allow the total dataset to grow substantially beyond available memory.
 
 Point reads first consult the newest in-memory state, and then older immutable on-disk state as necessary. SSTable lookups use the sparse index to locate the nearest key preceding the requested one and scan forward from that position.
+
+Bloom filters improve point-read scalability by avoiding unnecessary SSTable lookups as the number of stored records grows.
 
 ### Handling deleted records
 
@@ -70,9 +73,9 @@ The current index implementation uses a fixed stride, limiting lookups to a sequ
 
 ### Concurrency tradeoff
 
-The current write path serializes updates through the engine lock and performs *fsync()* as part of each write operation. This intentionally trades write throughput for a simple and explicit durability guarantee: once a write is acknowledged, its WAL record has been persisted.
+The current write path serializes updates through the engine lock and performs _fsync()_ as part of each write operation. This intentionally trades write throughput for a simple and explicit durability guarantee: once a write is acknowledged, its WAL record has been persisted.
 
-A higher-throughput implementation could introduce a dedicated WAL writer and batch incoming requests before a single *fsync()*. This could amortize the synchronization cost while preserving the same durability guarantee, provided requests are only acknowledged after the batch reaches the durability boundary.
+A higher-throughput implementation could introduce a dedicated WAL writer and batch incoming requests before a single _fsync()_. This could amortize the synchronization cost while preserving the same durability guarantee, provided requests are only acknowledged after the batch reaches the durability boundary.
 
 If multiple writers were allowed to construct WAL records independently, an explicit global sequence ID would also be needed to establish deterministic ordering.
 
@@ -94,20 +97,14 @@ The largest missing storage feature is SSTable compaction.
 
 SSTables currently accumulate over time. Consequently:
 
-* point reads may need to inspect multiple SSTables;
-* tombstones remain until compaction;
-* disk space is not reclaimed;
-* read amplification grows with the number of SSTables.
+- point reads may need to inspect multiple SSTables;
+- tombstones remain until compaction;
+- disk space is not reclaimed;
+- read amplification grows with the number of SSTables.
 
 I would implement background compaction that merges older SSTables while preserving newest-value semantics and allowing obsolete records and tombstones to be discarded when safe.
 
 Additionally, current implementation keeps all file descriptors related to existing SSTables open for the entire runtime. This could be solved by implementing a manager which would close files not used recently, however implementing compaction would mostly alleviate the need for this and would be a preferred approach.
-
-### Bloom filters
-
-The sparse index makes finding a key inside an SSTable efficient, but it does not tell us whether the key is present.
-
-A per-SSTable Bloom filter would allow the engine to cheaply skip SSTables that definitely do not contain a requested key. This becomes increasingly valuable as the number of SSTables grows.
 
 ### More concurrent writes
 
@@ -116,6 +113,8 @@ The current serialized write path favors correctness and simplicity over maximum
 A natural evolution would be a dedicated WAL writer with batching. Multiple requests could be collected and written together, amortizing filesystem synchronization costs while retaining an explicit durability point.
 
 This would also require defining ordering semantics explicitly, likely using sequence IDs.
+
+At a lower level, WAL writes could also be optimized by accumulating records into larger buffers or **filesystem-aligned pages** before issuing writes. This would reduce the overhead of many small write operations and complement request-level batching, although the primary bottleneck in the current implementation is expected to be fsync() rather than the individual write() calls.
 
 ### Streaming range reads
 
@@ -133,13 +132,12 @@ The current implementation is single-node. Replication would require a substanti
 
 The implementation intentionally stops short of several production-storage features:
 
-* SSTable compaction
-* Bloom filters
-* replication
-* asynchronous/batched WAL writes
-* a concurrent connection-handling architecture
-* streaming range queries
-* explicit management of orphaned temporary files after crashes
+- SSTable compaction
+- replication
+- batched WAL writes
+- a concurrent connection-handling architecture
+- streaming range queries
+- explicit management of orphaned temporary files after crashes
 
 The core persistence and recovery path is implemented and tested, including atomic SSTable publication and WAL replay based on persisted SSTable state.
 
@@ -162,7 +160,7 @@ WRITE p50   ~21 µs
 WRITE p99   ~63 µs
 ```
 
-while the maximum write latency was around 100 ms. These large outliers correspond to MemTable flushes triggered by WAL rotation rather than the normal write path.
+while the maximum write latency was around 100 ms. The remaining large outliers are not caused by synchronous MemTable flushes; the current write path still performs fsync() for each operation, which can introduce occasional high-latency outliers.
 
 Point-read latency increased as the number of SSTables grew:
 
@@ -184,7 +182,7 @@ The benchmark therefore exposed the expected tradeoff of the current design: wri
 
 Recovery also benefited substantially from persisted SSTables. Instead of replaying the complete historical WAL, startup only needs to replay WAL segments newer than the newest successfully persisted SSTable.
 
-Profiling also identified the MemTable tree traversal as a CPU hot path, with _collect() accounting for a significant portion of CPU time during range reads. This could be a candidate for further optimization, either by improving the underlying tree/range traversal algorithm or, if profiling continued to show it as a bottleneck, by moving the hot path to a lower-level implementation language such as C.
+Profiling also identified the MemTable tree traversal as a CPU hot path, with \_collect() accounting for a significant portion of CPU time during range reads. This could be a candidate for further optimization, either by improving the underlying tree/range traversal algorithm or, if profiling continued to show it as a bottleneck, by moving the hot path to a lower-level implementation language such as C.
 
 ```
 ncalls    tottime  percall  cumtime  percall  filename:lineno(function)
