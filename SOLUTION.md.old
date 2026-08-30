@@ -6,7 +6,7 @@ The design focuses around delivering **high throughput, especially when writing 
 
 ### Write path
 
-Write operation is built around a **Write-Ahead Log**
+The write operation is built around a **Write-Ahead Log**
 
 The WAL is responsible for:
 
@@ -14,11 +14,11 @@ The WAL is responsible for:
 - providing the durability boundary for acknowledged writes;
 - being the source of truth for recovering state after a crash.
 
-Appending a record is an *O(1)* operation regardless of the volume of stored records. Durability is enforced by *fsync()* after each single write operation or after a successful batch write. #TODO implications for crash during batch
+Appending a record is an *O(1)* operation with respect to the number of stored records.
+
+Durability is enforced by *fsync()* after each single write operation or after successfully writing a batch. Batch writes are not treated as atomic transactions: an interrupted batch may contain a prefix of its records in the WAL, while checksums allow recovery to detect and truncate a partially written final record. An acknowledged batch is only returned after the complete batch has been persisted and *fsync()* has completed.
 
 The system calculates a checksum for each record written, which enables detection of *torn-writes* during recovery and truncating the log after the last correct write.
-
-To achieve that I used an append-only **Write-Ahead Log** structure, providing fast *O(1)*, durable write operations and crash recovery.
 
 The WAL is segmented. Segment rotation is used to trigger MemTable flush, simplifying the relationship between the on-disk and in-memory state.
 
@@ -26,8 +26,8 @@ The WAL is segmented. Segment rotation is used to trigger MemTable flush, simpli
 
 Low-latency reads are achieved through a combination of:
 
-- **MemTable** - holds the current mutable in-memory state and serves read requests of newest records directy.
-- **SSTables** - provides immutable on-disk storage for data that no longer fits in memory.
+- **MemTable** - holds the current mutable in-memory state and serves read requests of newest records directly.
+- **SSTables** - provide immutable on-disk storage for data that no longer fits in memory.
 - **Sparse SSTable hint index** - provides efficient lookup within individual SSTables without requiring a full in-memory index.
 
 The MemTable acts as the active in-memory representation of the most recent state, while SSTables allow the total dataset to grow substantially beyond available memory.
@@ -40,11 +40,13 @@ Deletes are persisted as special tombstone records in WAL and represented as suc
 
 ### WAL, MemTable and SSTable recovery relationship
 
-The estabilished relationship between WAL segments, MemTable, and SSTables drastically simplifies the recovery logic.
+The established relationship between WAL segments, MemTable, and SSTables drastically simplifies the recovery logic.
 
-When a WAL segment is rotated and made immutable, it triggers a MemTable flush. MemTable is atomically frozen. The frozen MemTable still serves read requests but no longer accepts writes or deletes, those are serviced by a fresh MemTable. The frozen MemTable is then persisted as a new SSTable, with its name corresponding to the rotated WAL file. SSTable is written atomically using a temporary file and a rename operation. This ensures that the data in corresponding WAL segment, MemTable and SSTable is always consistent.
+When a WAL segment is rotated and made immutable, it triggers a MemTable flush. MemTable is atomically frozen. The frozen MemTable still serves read requests but no longer accepts writes or deletes, those are serviced by a fresh MemTable. The frozen MemTable is then persisted as a new SSTable, with its name corresponding to the rotated WAL file. The SSTable is written atomically using a temporary file and a rename operation.
 
-Thanks to that, recovery process only needs to estabilish the latest SSTable available and begin recovery from a WAL segment that comes after.
+This ensures that a partially written SSTable is never treated as successfully persisted. Because the WAL segment is durable before rotation triggers the flush, the WAL remains sufficient for recovery until the corresponding SSTable has been atomically published.
+
+Thanks to that, SSTable segment numbers correspond to the WAL segment that produced them, so replay starts at the segment immediately following the youngest successfully published SSTable.
 
 Replay of 100k records from WAL only:
 
@@ -68,19 +70,17 @@ WRITE: p50=   18.76 us | p95=   46.11 us | p99=   65.47 us | p99.9=  108.23 us |
 
 ### Sparse index tradeoff
 
-The SSTable hint index is intentionally sparse rather than indexing every record to facilitate the requirement of handling datasets larger then memory.
+The SSTable hint index is intentionally sparse rather than indexing every record to facilitate the requirement of handling datasets larger than memory.
 
 The current index implementation uses a fixed stride, limiting lookups to a sequential scan within the stride. With more time however, I would make the stride configurable so it could be tuned according to available memory.
 
 ### Concurrency tradeoff
 
-The current write path serializes updates through the engine lock. This keeps WAL ordering, MemTable updates, and rotation straightforward and makes the durability semantics easy to reason about.
+The current write path serializes updates through the engine lock and performs *fsync()* as part of each write operation. This intentionally trades write throughput for a simple and explicit durability guarantee: once a write is acknowledged, its WAL record has been persisted.
 
-A higher-throughput implementation could introduce a dedicated WAL writer and batch incoming requests before a single fsync. This would improve throughput by amortizing the synchronization cost while preserving the same durability guarantee: a request would only be acknowledged after its WAL record had been persisted and the corresponding durability boundary completed.
+A higher-throughput implementation could introduce a dedicated WAL writer and batch incoming requests before a single *fsync()*. This could amortize the synchronization cost while preserving the same durability guarantee, provided requests are only acknowledged after the batch reaches the durability boundary.
 
-If multiple writers were allowed to construct WAL records independently, an explicit global sequence ID would also be needed to establish a deterministic ordering.
-
-I chose the simpler serialized write path because it provides clear correctness, ordering, and durability semantics without introducing substantially more failure surface.
+If multiple writers were allowed to construct WAL records independently, an explicit global sequence ID would also be needed to establish deterministic ordering.
 
 ### Networking
 
@@ -89,8 +89,6 @@ The networking layer is intentionally minimal: a TCP connection carries length-p
 I initially delegated more of this implementation to AI, but rejected parts of the generated design. In particular, the generated protocol represented the operation name as a string. Since the protocol currently has only five operations, I replaced this with a compact byte representation rather than carrying a string for every request.
 
 I also rejected using Python object serialization as the protocol representation. The final implementation operates explicitly on buffers, which keeps the wire format under our control and avoids coupling the protocol to Python object serialization.
-
-If this were exposed to untrusted clients, authentication, encryption, input validation, and a safe serialization format would be required. Python `pickle` must not be used to deserialize untrusted network input.
 
 ---
 
@@ -147,7 +145,6 @@ The implementation intentionally stops short of several production-storage featu
 * asynchronous/batched WAL writes
 * a concurrent connection-handling architecture
 * streaming range queries
-* production-grade authentication/TLS
 * explicit management of orphaned temporary files after crashes
 
 The core persistence and recovery path is implemented and tested, including atomic SSTable publication and WAL replay based on persisted SSTable state.
@@ -159,6 +156,8 @@ I chose to leave these features out rather than introduce significantly more com
 ---
 
 ## 4. Benchmark Observations
+
+> **NOTE:** These measurements are environment-dependent, but are useful for identifying relative behavior and scaling characteristics.
 
 The benchmark was designed to keep the same mixed workload while allowing the range-read component to be varied independently. This makes it possible to observe not only range-read latency itself, but also its effect on point reads and writes.
 
@@ -215,7 +214,7 @@ I reviewed the boundaries between the WAL, MemTable, and SSTable implementations
 
 I cleaned up the implementation manually, established explicit resource lifecycle boundaries, and manually added missing test coverage. AI was also useful for suggesting additional edge cases that I had not initially identified.
 
-One area where I find agents are struggling without supervision is optimizing for code's cyclomatic complexity. Therefore I always make sure to review and refactor AI solutions to minimize code complexity and ensure the code base is readable and maintainable layering more features on-top.
+One area where I found AI-generated implementations needed particular manual review was cyclomatic complexity and layering. Generated solutions tended to optimize for completing the requested behavior rather than minimizing branching or preserving clean boundaries. I therefore reviewed and refactored these implementations manually rather than treating passing tests as sufficient.
 
 This stage was intentionally more hands-on. I wanted the core storage components to have stable interfaces before allowing broader AI-assisted changes.
 
@@ -227,7 +226,7 @@ For example, I initially delegated the networking implementation more broadly.
 
 I did not accept the generated implementation unchanged. One concrete example was its use of strings for request methods. The protocol currently has only five operations, so I replaced the string representation with a compact byte representation. I would consider allocating a larger method field if future extensibility required it.
 
-Another rejected choice was using Python object serialization for the protocol. I preferred explicit buffer-based encoding because it keeps the wire representation under control and is consistent with the rest of the implementation. In particular, I would not use `pickle` for untrusted network input because deserialization of untrusted pickle data is unsafe.
+Another rejected choice was using Python object serialization for the protocol. I preferred explicit buffer-based encoding because it keeps the wire representation under control and is consistent with the rest of the implementation.
 
 The overall pattern was therefore intentional delegation rather than unrestricted generation:
 
