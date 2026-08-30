@@ -22,8 +22,6 @@ class WAL:
         self.wal_dir.mkdir(parents=True, exist_ok=True)
 
         self._current_segment = self._youngest_log_number()
-        self._current = self._open_log(self._current_segment)
-        self._current_size = self._current.seek(0, SEEK_SET)
         self._on_rotate = on_rotate
 
     def _should_rotate_wal(self, record_size: int) -> bool:
@@ -110,6 +108,17 @@ class WAL:
             and not self._current.closed
         ):
             self._current.close()
+
+    def open(self) -> "WAL":
+        self._current = self._open_log(self._current_segment)
+        self._current_size = self._current.seek(0, SEEK_SET)
+        return self
+
+    def __enter__(self):
+        return self.open()
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
 
     def __del__(self) -> None:
         try:

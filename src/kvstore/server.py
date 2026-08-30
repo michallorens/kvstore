@@ -1,19 +1,20 @@
 import pickle
 import socket
 import struct
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from kvstore.engine import KVStoreEngine
+if TYPE_CHECKING:
+    from kvstore.main import KVStoreAPI
 
 
 class KVServer:
     def __init__(
         self,
-        store: KVStoreEngine,
+        api: "KVStoreAPI",
         host: str = "127.0.0.1",
         port: int = 9000,
     ) -> None:
-        self.store = store
+        self.api = api
         self.host = host
         self.port = port
 
@@ -49,30 +50,30 @@ class KVServer:
         operation = request["operation"]
 
         if operation == "put":
-            self.store.put(
+            self.api.put(
                 request["key"],
                 request["value"],
             )
             return None
 
         if operation == "read":
-            return self.store.read(request["key"])
+            return self.api.read(request["key"])
 
         if operation == "range":
-            return self.store.read_key_range(
+            return self.api.read_key_range(
                 request["start"],
                 request["end"],
             )
 
         if operation == "batch_put":
-            self.store.batch_put(
+            self.api.batch_put(
                 request["keys"],
                 request["values"],
             )
             return None
 
         if operation == "delete":
-            self.store.delete(request["key"])
+            self.api.delete(request["key"])
             return None
 
         raise ValueError(f"unknown operation: {operation}")

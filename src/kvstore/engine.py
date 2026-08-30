@@ -1,6 +1,7 @@
 from collections import deque
 from threading import RLock
 from pathlib import Path
+from typing import Iterator
 
 from kvstore.memtable import MemTable, NOT_FOUND
 from kvstore.wal import WAL
@@ -11,23 +12,16 @@ from kvstore.sstable import SSTable
 
 class KVStoreEngine:
     def __init__(self, config: Config = Config()) -> None:
+        self._config = config
         self.data_dir = Path(config.data_dir)
         self._lock = RLock()
-        self.memtable = MemTable()
-        self.sstables: deque[SSTable] = deque(
-            SSTable(path) for path in sorted(self.data_dir.glob("*.sst"))
-        )
-        self.frozen_memtables: deque[MemTable] = deque()
-
         self.wal = WAL(
-            wal_dir=config.data_dir,
-            max_wal_size=config.max_wal_size,
+            wal_dir=self._config.data_dir,
+            max_wal_size=self._config.max_wal_size,
             on_rotate=self._on_wal_rotate,
         )
-
-        self.wal.replay(
-            on_read=self.memtable.put, start_segment=self._next_wal_segment()
-        )
+        self.memtable = MemTable()
+        self.frozen_memtables: deque[MemTable] = deque()
 
     def _on_wal_rotate(self, segment: int) -> None:
         with self._lock:
@@ -49,17 +43,28 @@ class KVStoreEngine:
             return 0
         return int(self.sstables[-1].path.stem) + 1
 
-    def __enter__(self):
+    def open(self) -> "KVStoreEngine":
+        self.sstables: deque[SSTable] = deque(
+            SSTable(path) for path in sorted(self.data_dir.glob("*.sst"))
+        )
+        self.wal.open()
+        self.wal.replay(
+            on_read=self.memtable.put, start_segment=self._next_wal_segment()
+        )
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __enter__(self) -> "KVStoreEngine":
+        return self.open()
+
+    def close(self) -> None:
         self.wal.close()
         for sstable in self.sstables:
             sstable.close()
 
-    def put(self, key: bytes, value: bytes):
-        record = Record(key, value)
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
+    def put(self, record: Record):
         with self._lock:
             self.wal.append(record)
             self.memtable.put(record)
@@ -67,12 +72,7 @@ class KVStoreEngine:
     def _append_to_current_memtable(self, record: Record) -> None:
         self.memtable.put(record)
 
-    def batch_put(self, keys: list[bytes], values: list[bytes]):
-        if len(keys) != len(values):
-            raise ValueError("keys and values must have the same length!")
-
-        records = [Record(k, v) for k, v in zip(keys, values)]
-
+    def batch_put(self, records: Iterator[Record]):
         with self._lock:
             self.wal.append_batch(records, on_write=self._append_to_current_memtable)
 

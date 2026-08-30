@@ -1,33 +1,41 @@
+from kvstore.config import Config
 from kvstore.engine import KVStoreEngine
+from kvstore.record import Record
 from kvstore.server import KVServer
 
 
-# class KVStore:
-#     def __init__(self, config: Config = Config()) -> None:
-#         self._engine = KVStoreEngine(config)
+class KVStoreAPI:
+    def __init__(self, config: Config = Config()) -> None:
+        self._engine = KVStoreEngine(config)
 
-#     def put(self, key: bytes, value: bytes) -> None:
-#         self._engine.put(Record(key, value))
+    def __enter__(self):
+        self._engine.open()
 
-#     def batch_put(self, keys: list[bytes], values: list[bytes]) -> None:
-#         if len(keys) != len(values):
-#             raise ValueError(...)
+    def __exit__(self, exc_type, exc, tb):
+        self._engine.close()
 
-#         self._engine.put_batch(Record(k, v) for k, v in zip(keys, values))
+    def put(self, key: bytes, value: bytes) -> None:
+        self._engine.put(Record(key, value))
 
-#     def read(self, key: bytes) -> bytes | None:
-#         return self._engine.read(key)
+    def batch_put(self, keys: list[bytes], values: list[bytes]) -> None:
+        if len(keys) != len(values):
+            raise ValueError("keys and values must have the same length!")
 
-#     def read_key_range(self, start: bytes, end: bytes) -> dict[bytes, bytes]:
-#         return self._engine.read_range(start, end)
+        self._engine.batch_put(Record(k, v) for k, v in zip(keys, values))
 
-#     def delete(self, key: bytes) -> None:
-#         self._engine.delete(key)
+    def read(self, key: bytes) -> bytes | None:
+        return self._engine.read(key)
+
+    def read_key_range(self, start: bytes, end: bytes) -> dict[bytes, bytes]:
+        return self._engine.read_key_range(start, end)
+
+    def delete(self, key: bytes) -> None:
+        self._engine.delete(key)
 
 
 def main() -> None:
-    with KVStoreEngine() as store:
-        server = KVServer(store)
+    with KVStoreAPI() as api:
+        server = KVServer(api)
         server.run()
 
 

@@ -10,6 +10,7 @@ from unittest import TestCase
 
 from kvstore import KVStoreEngine
 from kvstore.config import Config
+from kvstore.record import Record
 
 
 def _env_float(name: str, default: float) -> float:
@@ -101,7 +102,7 @@ class TestKVStoreBenchmark(TestCase):
         value = rng.randbytes(128)
 
         operation_start = time.perf_counter_ns()
-        kvstore.put(key, value)
+        kvstore.put(Record(key, value))
         elapsed = time.perf_counter_ns() - operation_start
 
         write_latencies.append(elapsed)
@@ -123,23 +124,25 @@ class TestKVStoreBenchmark(TestCase):
         batch_put_latencies: list[int],
     ) -> None:
         batch = [
-            (rng.randbytes(16), rng.randbytes(128)) for _ in range(rng.randint(2, 8))
+            Record(rng.randbytes(16), rng.randbytes(128))
+            for _ in range(rng.randint(2, 8))
         ]
-        batch_keys, batch_values = zip(*batch)
 
         operation_start = time.perf_counter_ns()
-        kvstore.batch_put(list(batch_keys), list(batch_values))
+        kvstore.batch_put(iter(batch))
         elapsed = time.perf_counter_ns() - operation_start
 
         batch_put_latencies.append(elapsed)
-        for key, value in batch:
-            if key not in values:
-                keys.append(key)
-            values[key] = value
+        for record in batch:
+            if record.key not in values:
+                keys.append(record.key)
+            values[record.key] = (
+                record.value if isinstance(record.value, bytes) else None
+            )
 
-            index = bisect_left(sorted_keys, key)
-            if index == len(sorted_keys) or sorted_keys[index] != key:
-                insort(sorted_keys, key)
+            index = bisect_left(sorted_keys, record.key)
+            if index == len(sorted_keys) or sorted_keys[index] != record.key:
+                insort(sorted_keys, record.key)
 
     def _profile_delete(
         self,
