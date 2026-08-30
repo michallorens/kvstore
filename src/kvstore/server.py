@@ -3,13 +3,13 @@ import socket
 import struct
 from typing import Any
 
-from kvstore.api import KVStoreAPI
+from kvstore.engine import KVStoreEngine
 
 
 class KVServer:
     def __init__(
         self,
-        store: KVStoreAPI,
+        store: KVStoreEngine,
         host: str = "127.0.0.1",
         port: int = 9000,
     ) -> None:

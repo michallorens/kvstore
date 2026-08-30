@@ -100,9 +100,27 @@ class WAL:
 
             on_read(record)
 
-    def replay(self, on_read: Callable[[Record], None]) -> None:
+    def close(self) -> None:
+        if (
+            hasattr(self, "_current")
+            and self._current is not None
+            and not self._current.closed
+        ):
+            self._current.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def replay(self, on_read: Callable[[Record], None], start_segment: int = 0) -> None:
         for file in sorted(
-            (path for path in Path(self.wal_dir).glob("*.log") if path.stem.isdigit()),
+            (
+                path
+                for path in Path(self.wal_dir).glob("*.log")
+                if path.stem.isdigit() and int(path.stem) >= start_segment
+            ),
             key=lambda path: int(path.stem),
         ):
             with file.open("r+b") as wal_file:

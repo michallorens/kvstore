@@ -1,0 +1,241 @@
+# Solution
+
+## 1. Design and Tradeoffs
+
+The design focuses around delivering **high throughput, especially when writing an incoming stream of random items** as a key requirement, while also supporting datasets significantly larger than memory, providing durability of data and crash recovery. With specific improvements it could also handle read operations with low-latency without degradation.
+
+### Write path
+
+Write operation is built around a **Write-Ahead Log**
+
+The WAL is responsible for:
+
+- persisting incoming writes in append-only fashion;
+- providing the durability boundary for acknowledged writes;
+- being the source of truth for recovering state after a crash.
+
+Appending a record is an *O(1)* operation regardless of the volume of stored records. Durability is enforced by *fsync()* after each single write operation or after a successful batch write. #TODO implications for crash during batch
+
+The system calculates a checksum for each record written, which enables detection of *torn-writes* during recovery and truncating the log after the last correct write.
+
+To achieve that I used an append-only **Write-Ahead Log** structure, providing fast *O(1)*, durable write operations and crash recovery.
+
+The WAL is segmented. Segment rotation is used to trigger MemTable flush, simplifying the relationship between the on-disk and in-memory state.
+
+### Read path
+
+Low-latency reads are achieved through a combination of:
+
+- **MemTable** - holds the current mutable in-memory state and serves read requests of newest records directy.
+- **SSTables** - provides immutable on-disk storage for data that no longer fits in memory.
+- **Sparse SSTable hint index** - provides efficient lookup within individual SSTables without requiring a full in-memory index.
+
+The MemTable acts as the active in-memory representation of the most recent state, while SSTables allow the total dataset to grow substantially beyond available memory.
+
+Point reads first consult the newest in-memory state, and then older immutable on-disk state as necessary. SSTable lookups use the sparse index to locate the nearest key preceding the requested one and scan forward from that position.
+
+### Handling deleted records
+
+Deletes are persisted as special tombstone records in WAL and represented as such in both MemTable and SSTables in order to correctly merge the state across MemTable and multiple SSTables.
+
+### WAL, MemTable and SSTable recovery relationship
+
+The estabilished relationship between WAL segments, MemTable, and SSTables drastically simplifies the recovery logic.
+
+When a WAL segment is rotated and made immutable, it triggers a MemTable flush. MemTable is atomically frozen. The frozen MemTable still serves read requests but no longer accepts writes or deletes, those are serviced by a fresh MemTable. The frozen MemTable is then persisted as a new SSTable, with its name corresponding to the rotated WAL file. SSTable is written atomically using a temporary file and a rename operation. This ensures that the data in corresponding WAL segment, MemTable and SSTable is always consistent.
+
+Thanks to that, recovery process only needs to estabilish the latest SSTable available and begin recovery from a WAL segment that comes after.
+
+Replay of 100k records from WAL only:
+
+```
+REPLAY: 1326.34 ms
+```
+
+Replay of 100k records when skipping existing SSTables:
+
+```
+REPLAY: 313.27 ms
+```
+
+The trade-off is that the WAL segment size influences the size of the in-memory MemTable cache.
+
+Additionally, current implementation flushes the MemTable synchronously during rotation which causes a spike at the tail-end of the benchmark:
+
+```
+WRITE: p50=   18.76 us | p95=   46.11 us | p99=   65.47 us | p99.9=  108.23 us | max=95330.46 us
+```
+
+### Sparse index tradeoff
+
+The SSTable hint index is intentionally sparse rather than indexing every record to facilitate the requirement of handling datasets larger then memory.
+
+The current index implementation uses a fixed stride, limiting lookups to a sequential scan within the stride. With more time however, I would make the stride configurable so it could be tuned according to available memory.
+
+### Concurrency tradeoff
+
+The current write path serializes updates through the engine lock. This keeps WAL ordering, MemTable updates, and rotation straightforward and makes the durability semantics easy to reason about.
+
+A higher-throughput implementation could introduce a dedicated WAL writer and batch incoming requests before a single fsync. This would improve throughput by amortizing the synchronization cost while preserving the same durability guarantee: a request would only be acknowledged after its WAL record had been persisted and the corresponding durability boundary completed.
+
+If multiple writers were allowed to construct WAL records independently, an explicit global sequence ID would also be needed to establish a deterministic ordering.
+
+I chose the simpler serialized write path because it provides clear correctness, ordering, and durability semantics without introducing substantially more failure surface.
+
+### Networking
+
+The networking layer is intentionally minimal: a TCP connection carries length-prefixed requests and responses.
+
+I initially delegated more of this implementation to AI, but rejected parts of the generated design. In particular, the generated protocol represented the operation name as a string. Since the protocol currently has only five operations, I replaced this with a compact byte representation rather than carrying a string for every request.
+
+I also rejected using Python object serialization as the protocol representation. The final implementation operates explicitly on buffers, which keeps the wire format under our control and avoids coupling the protocol to Python object serialization.
+
+If this were exposed to untrusted clients, authentication, encryption, input validation, and a safe serialization format would be required. Python `pickle` must not be used to deserialize untrusted network input.
+
+---
+
+## 2. What I Would Improve With More Time
+
+### Compaction
+
+The largest missing storage feature is SSTable compaction.
+
+SSTables currently accumulate over time. Consequently:
+
+* point reads may need to inspect multiple SSTables;
+* tombstones remain until compaction;
+* disk space is not reclaimed;
+* read amplification grows with the number of SSTables.
+
+I would implement background compaction that merges older SSTables while preserving newest-value semantics and allowing obsolete records and tombstones to be discarded when safe.
+
+Additionally, current implementation keeps all file descriptors related to existing SSTables open for the entire runtime. This could be solved by implementing a manager which would close files not used recently, however implementing compaction would mostly alleviate the need for this and would be a preferred approach.
+
+### Bloom filters
+
+The sparse index makes finding a key inside an SSTable efficient, but it does not tell us whether the key is present.
+
+A per-SSTable Bloom filter would allow the engine to cheaply skip SSTables that definitely do not contain a requested key. This becomes increasingly valuable as the number of SSTables grows.
+
+### More concurrent writes
+
+The current serialized write path favors correctness and simplicity over maximum throughput.
+
+A natural evolution would be a dedicated WAL writer with batching. Multiple requests could be collected and written together, amortizing filesystem synchronization costs while retaining an explicit durability point.
+
+This would also require defining ordering semantics explicitly, likely using sequence IDs.
+
+### Streaming range reads
+
+`read_key_range()` currently materializes its result as a dictionary. This is convenient for the API and tests but means memory usage grows with the result size.
+
+A production interface could expose an iterator or streaming protocol for large ranges.
+
+### Replication
+
+The current implementation is single-node. Replication would require a substantially larger architectural addition, including an ordering/consensus mechanism and replicated durability semantics.
+
+---
+
+## 3. What's Incomplete
+
+The implementation intentionally stops short of several production-storage features:
+
+* SSTable compaction
+* Bloom filters
+* replication
+* asynchronous/batched WAL writes
+* a concurrent connection-handling architecture
+* streaming range queries
+* production-grade authentication/TLS
+* explicit management of orphaned temporary files after crashes
+
+The core persistence and recovery path is implemented and tested, including atomic SSTable publication and WAL replay based on persisted SSTable state.
+
+The remaining work is primarily about scaling the design rather than completing the basic storage semantics.
+
+I chose to leave these features out rather than introduce significantly more complex concurrency and lifecycle behavior without enough time to test it properly.
+
+---
+
+## 4. Benchmark Observations
+
+The benchmark was designed to keep the same mixed workload while allowing the range-read component to be varied independently. This makes it possible to observe not only range-read latency itself, but also its effect on point reads and writes.
+
+At around 1 million records, normal write latency remained approximately constant:
+
+```text
+WRITE p50   ~21 µs
+WRITE p99   ~63 µs
+```
+
+while the maximum write latency was around 100 ms. These large outliers correspond to MemTable flushes triggered by WAL rotation rather than the normal write path.
+
+Point-read latency increased as the number of SSTables grew:
+
+```text
+READ p50   ~691 µs
+READ p99   ~3.5 ms
+```
+
+This is consistent with the current read architecture: a lookup may need to search multiple immutable SSTables, even though the sparse index makes the lookup within each individual SSTable efficient.
+
+A 1,000-key range query had approximately:
+
+```text
+READ_RANGE_1000 p50   ~5.0 ms
+READ_RANGE_1000 p99   ~9.2 ms
+```
+
+The benchmark therefore exposed the expected tradeoff of the current design: writes remain cheap on the active MemTable, while read amplification becomes the dominant scaling concern as immutable SSTables accumulate.
+
+Recovery also benefited substantially from persisted SSTables. Instead of replaying the complete historical WAL, startup only needs to replay WAL segments newer than the newest successfully persisted SSTable.
+
+---
+
+## 5. AI Usage Notes
+
+I used AI throughout the exercise, but deliberately changed how broadly I delegated work as the architecture became more stable.
+
+### Initial implementation: targeted assistance
+
+Initially, I used AI sparingly and for narrowly scoped implementation tasks.
+
+I designed the overall architecture and component boundaries myself, then used AI to fill in individual stubbed methods or suggest algorithms.
+
+For example, the MemTable uses a treap, and the treap implementation was entirely AI-generated. I reviewed the implementation and integrated it into the architecture rather than asking AI to design the MemTable and surrounding storage engine as a whole.
+
+I also used AI to generate tests and benchmarks to move faster. These were treated as inputs rather than automatically trusted coverage: I reviewed them, validated their assumptions, and manually added missing test cases.
+
+### Consolidating the core storage components
+
+Once the core storage components were working, I shifted attention from implementation speed to separation of concerns.
+
+I reviewed the boundaries between the WAL, MemTable, and SSTable implementations and made sure they did not unnecessarily depend on each other's internal behavior.
+
+I cleaned up the implementation manually, established explicit resource lifecycle boundaries, and manually added missing test coverage. AI was also useful for suggesting additional edge cases that I had not initially identified.
+
+One area where I find agents are struggling without supervision is optimizing for code's cyclomatic complexity. Therefore I always make sure to review and refactor AI solutions to minimize code complexity and ensure the code base is readable and maintainable layering more features on-top.
+
+This stage was intentionally more hands-on. I wanted the core storage components to have stable interfaces before allowing broader AI-assisted changes.
+
+### Broader delegation after the core stabilized
+
+Once the core storage components were stable and their interfaces were effectively closed, I became comfortable delegating larger pieces of work while keeping those components unchanged.
+
+For example, I initially delegated the networking implementation more broadly.
+
+I did not accept the generated implementation unchanged. One concrete example was its use of strings for request methods. The protocol currently has only five operations, so I replaced the string representation with a compact byte representation. I would consider allocating a larger method field if future extensibility required it.
+
+Another rejected choice was using Python object serialization for the protocol. I preferred explicit buffer-based encoding because it keeps the wire representation under control and is consistent with the rest of the implementation. In particular, I would not use `pickle` for untrusted network input because deserialization of untrusted pickle data is unsafe.
+
+The overall pattern was therefore intentional delegation rather than unrestricted generation:
+
+1. Design the architecture and boundaries manually.
+2. Use AI for narrowly scoped algorithms and implementation work.
+3. Validate the generated implementation with tests and inspection.
+4. Stabilize and clean up the component boundaries manually.
+5. Only then allow AI to work on broader, isolated areas such as networking.
+6. Reject generated choices that conflicted with the existing architecture or introduced unnecessary complexity.
+
+AI accelerated implementation, testing, and exploration, but architectural decisions and final acceptance remained manual.

@@ -9,39 +9,49 @@ from kvstore.record import Record
 from kvstore.sstable import SSTable
 
 
-class KVStoreAPI:
+class KVStoreEngine:
     def __init__(self, config: Config = Config()) -> None:
+        self.data_dir = Path(config.data_dir)
         self._lock = RLock()
         self.memtable = MemTable()
-        self.sstables: deque[SSTable] = deque()
+        self.sstables: deque[SSTable] = deque(
+            SSTable(path) for path in sorted(self.data_dir.glob("*.sst"))
+        )
         self.frozen_memtables: deque[MemTable] = deque()
 
-        def on_wal_rotate(segment: int) -> None:
-            with self._lock:
-                frozen = self.memtable
-                frozen.freeze()
-                self.memtable = MemTable()
-                self.frozen_memtables.append(frozen)
+        self.wal = WAL(
+            wal_dir=config.data_dir,
+            max_wal_size=config.max_wal_size,
+            on_rotate=self._on_wal_rotate,
+        )
 
-            sstable = SSTable.from_memtable(
-                frozen, Path(config.wal_dir) / f"{segment:06d}.sst"
-            )
+        self.wal.replay(
+            on_read=self.memtable.put, start_segment=self._next_wal_segment()
+        )
+
+    def _on_wal_rotate(self, segment: int) -> None:
+        with self._lock:
+            frozen = self.memtable
+            frozen.freeze()
+            self.memtable = MemTable()
+            self.frozen_memtables.append(frozen)
+
+        sstable = SSTable.from_memtable(
+            frozen, Path(self.data_dir) / f"{segment:06d}.sst"
+        )
+
+        with self._lock:
             self.sstables.append(sstable)
             self.frozen_memtables.popleft()
 
-        self.wal = WAL(
-            wal_dir=config.wal_dir,
-            max_wal_size=config.max_wal_size,
-            on_rotate=on_wal_rotate,
-        )
-
-        self.wal.replay(on_read=self.memtable.put)
+    def _next_wal_segment(self) -> int:
+        return int(self.sstables[-1].path.stem) + 1 if len(self.sstables) > 0 else -1
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        self.wal._current.close()
+        self.wal.close()
         for sstable in self.sstables:
             sstable.close()
 
@@ -62,6 +72,12 @@ class KVStoreAPI:
             for record in records:
                 self.memtable.put(record)
 
+    def delete(self, key: bytes) -> None:
+        with self._lock:
+            record = Record.tombstone(key)
+            self.wal.append(record)
+            self.memtable.put(record)
+
     def _get_tables(self) -> list[MemTable | SSTable]:
         with self._lock:
             return [*self.sstables, *self.frozen_memtables, self.memtable]
@@ -71,7 +87,10 @@ class KVStoreAPI:
             value = memtable.read(key)
 
             if value is not NOT_FOUND:
-                return value  # ty: ignore
+                if value is None:
+                    return None
+                assert isinstance(value, bytes)
+                return value
 
         return None
 
@@ -82,8 +101,3 @@ class KVStoreAPI:
             result.update(memtable.range(start, end))
 
         return {key: value for key, value in result.items() if value is not None}
-
-    def delete(self, key: bytes) -> None:
-        record = Record.tombstone(key)
-        self.wal.append(record)
-        self.memtable.put(record)

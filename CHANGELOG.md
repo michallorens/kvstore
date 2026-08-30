@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-30
+
+```
+ncalls    tottime  percall  cumtime  percall  filename:lineno(function)
+5064      0.637    0.000    7.797    0.002    /var/home/interviews/kvstore/src/kvstore/engine.py:93(read_key_range)
+5066      0.006    0.000    7.071    0.001    /var/home/interviews/kvstore/src/kvstore/memtable.py:40(range)
+5066      7.066    0.000    7.066    0.001    /var/home/interviews/kvstore/src/kvstore/memtable.py:78(_collect)
+219069    0.127    0.000    4.763    0.000    /var/home/interviews/kvstore/src/kvstore/memtable.py:24(put)
+219068    4.333    0.000    4.635    0.000    /var/home/interviews/kvstore/src/kvstore/memtable.py:45(_insert)
+```
+
+100k records:
+
+```
+READ : p50=  155.70 us | p95=  811.12 us | p99= 1250.92 us | p99.9= 2496.47 us | max= 5248.83 us
+WRITE: p50=   18.76 us | p95=   46.11 us | p99=   65.47 us | p99.9=  108.23 us | max=95330.46 us
+READ_RANGE_1000: p50= 3195.47 us | p95= 5687.34 us | p99= 8822.37 us | p99.9=15272.65 us | max=21034.93 us
+WRITE_BATCH: p50=   70.38 us | p95=  157.09 us | p99=  251.29 us | p99.9=  576.06 us | max=88197.46 us
+DELETE: p50=   18.73 us | p95=   44.75 us | p99=   67.17 us | p99.9=   91.07 us | max=  139.60 us
+RATE : 1,599.98 ops/s
+REPLAY: 313.27 ms
+```
+
+1M records:
+
+```
+READ : p50= 1496.99 us | p95= 6381.99 us | p99=22765.54 us | p99.9=37972.42 us | max=78890.80 us
+WRITE: p50=   23.50 us | p95=   56.90 us | p99=   73.86 us | p99.9=  108.36 us | max=259438.42 us=   55.12 us | p99=   69.02 us | p99.9=
+READ_RANGE_1000: p50= 6920.32 us | p95=12707.36 us | p99=51272.36 us | p99.9=66970.52 us | max=152931.81 us
+WRITE_BATCH: p50=   83.18 us | p95=  164.25 us | p99=  248.31 us | p99.9=  567.34 us | max=159264.49 us
+DELETE: p50=   24.02 us | p95=   57.21 us | p99=   73.98 us | p99.9=  111.45 us | max=93521.72 us
+RATE : 224.40 ops/s
+REPLAY: 344.13 ms
+```
+
+- Improved time of replay/recovery
+- Degraded tail-end due to SSTables being flushed synchronously
+- Write latency remains constant regardless of volume, reads degrade due to growing number of SSTables to scan
+
+### Added
+
+- SOLUTION.md
+
+### Fixed
+
+- Current WAL file left open
+- Writing SSTables and corresponding hint files atomically
+- WAL replay skipping log files with corresponding SSTables
+  - Recovery time is down from 1400us to 300us for 100k records
+  - SSTables however come at the cost of read time which has risen to p50=155us
+- SSTable list not populated on startup
+- Heavy sorting in the benchmark polluting profiler results
+- Not benchmarking reads against tombstoned records, due to removing keys from benchmark cache
+
+### Changed
+
+- Limited WAL size in benchmark to test WAL rotation, SSTables and replay
+- Parametrized the benchmark (op ratios, range read size, max ops & memory limit)
+
 ## [0.10.0] - 2026-08-30
 
 ### Added

@@ -1,3 +1,4 @@
+import os
 from bisect import bisect_right
 from pathlib import Path
 from typing import Iterator
@@ -19,7 +20,13 @@ class SSTable:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(path, mode="wb") as data, open(f"{path}.hint", mode="wb") as hint:
+        data_tmp = path.with_suffix(".tmp")
+        hint_tmp = path.with_suffix(".hint.tmp")
+
+        with (
+            data_tmp.open("wb") as data,
+            hint_tmp.open("wb") as hint,
+        ):
             offset = 0
 
             for i, record in enumerate(memtable.records()):
@@ -33,13 +40,21 @@ class SSTable:
                 data.write(record.to_bytes())
                 offset += len(record)
 
+            data.flush()
+            os.fsync(data.fileno())
+            hint.flush()
+            os.fsync(hint.fileno())
+
+        os.replace(data_tmp, path)
+        os.replace(hint_tmp, path.with_suffix(".hint"))
+
         return cls(path)
 
     def _load_hints(self) -> None:
         self.index_keys: list[bytes] = []
         self.index_offsets: list[int] = []
 
-        with open(f"{self.path}.hint", "rb") as file:
+        with self.path.with_suffix(".hint").open("rb") as file:
             while True:
                 header = file.read(12)
 

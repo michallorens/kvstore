@@ -91,3 +91,18 @@ class TestRecord(TestCase):
             buffer.seek(0)
 
             self.assertEqual(Record.from_buffer(buffer), Record(b"key", b"value"))
+
+            buffer.seek(0)
+            buffer.write(b"\xb8\x91N[\x00\x00\x00\x03\x00\x00\x00\x05keyvaluE")
+            buffer.seek(0)
+
+            with self.assertRaises(ValueError):
+                Record.from_buffer(buffer)
+
+            buffer.seek(0)
+            buffer.write(b"\xf2J\xe45\x00\x00\x00\x03\xff\xff\xff\xffkey")
+            buffer.write(b"\xb8\x91N[\x00\x00\x00\x03\x00\x00\x00\x05keyvalue")
+            buffer.seek(0)
+
+            self.assertEqual(Record.from_buffer(buffer), Record.tombstone(b"key"))
+            self.assertEqual(Record.from_buffer(buffer), Record(b"key", b"value"))

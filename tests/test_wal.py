@@ -77,13 +77,40 @@ class TestWAL(TestCase):
             wal.append(Record(b"next", b"value"))
 
             records = []
-
-            def on_read(record: Record) -> None:
-                records.append(record)
-
-            wal.replay(on_read=on_read)
+            wal.replay(on_read=records.append)
 
             self.assertEqual(len(records), 2)
             self.assertEqual(records[0], Record(b"first", b"value"))
             self.assertEqual(records[1], Record(b"next", b"value"))
             wal._current.close()
+
+    def test_replay_from_specified_segment(self) -> None:
+        with TemporaryDirectory() as wal_dir:
+            wal = WAL(wal_dir, max_wal_size=20)
+            wal.append(Record(b"first", b"value"))
+            wal.append(Record(b"next", b"value"))
+
+            records = []
+            wal.replay(on_read=records.append, start_segment=1)
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0], Record(b"next", b"value"))
+            wal._current.close()
+
+    def test_replay_ignores_torn_record_at_end_of_log(self) -> None:
+        with TemporaryDirectory() as wal_dir:
+            wal = WAL(wal_dir)
+            wal.append(Record(b"first", b"value"))
+
+            wal._current.write(b"\x00\x00\x00\x03\x00\x00\x00")
+            wal._current.flush()
+            wal._current.close()
+
+            records = []
+            wal.replay(on_read=records.append)
+
+            self.assertEqual(records, [Record(b"first", b"value")])
+            self.assertEqual(
+                Path(wal_dir, "000000.log").stat().st_size,
+                len(Record(b"first", b"value").to_bytes()),
+            )
