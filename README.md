@@ -29,3 +29,19 @@ python
 >> client.read(b"key")
 b"value"
 ```
+
+### Tests
+
+In order to run the tests and benchmark the key-value store, run:
+
+```
+KVSTORE_MAX_OPS=100000 uv run python -m unittest
+```
+
+You can override benchmark parameters with environment variables.
+
+You can also profile the code using:
+
+```
+uv run pytest --profile
+```
