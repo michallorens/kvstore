@@ -1,10 +1,52 @@
-import pickle
 import socket
 import struct
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kvstore.main import KVStoreAPI
+
+PUT = 0
+READ = 1
+RANGE = 2
+BATCH_PUT = 3
+DELETE = 4
+
+
+def pack_bytes(value: bytes) -> bytes:
+    return len(value).to_bytes(4, "big") + value
+
+
+def pack_pair(key: bytes, value: bytes) -> bytes:
+    return pack_bytes(key) + pack_bytes(value)
+
+
+def unpack_bytes(payload: bytes) -> bytes:
+    size = int.from_bytes(payload[:4], "big")
+    return payload[4 : 4 + size]
+
+
+def unpack_pair(payload: bytes) -> tuple[bytes, bytes]:
+    key_size = int.from_bytes(payload[:4], "big")
+    offset = key_size + 4
+    key = payload[4:offset]
+    value_size = int.from_bytes(payload[offset : offset + 4], "big")
+    offset += 4
+    value = payload[offset : offset + value_size]
+
+    return key, value
+
+
+def unpack_batch(payload: bytes) -> tuple[list[bytes], list[bytes]]:
+    keys = []
+    values = []
+
+    while len(payload) > 0:
+        key, value = unpack_pair(payload)
+        keys.append(key)
+        values.append(value)
+        payload = payload[len(key) + len(value) + 8 :]
+
+    return keys, values
 
 
 class KVServer:
@@ -46,34 +88,40 @@ class KVServer:
             response = self._handle(request)
             self._send_message(conn, response)
 
-    def _handle(self, request: dict[str, Any]) -> Any:
-        operation = request["operation"]
+    @classmethod
+    def _pack_range(cls, range: dict[bytes, bytes]) -> bytes:
+        payload = b""
 
-        if operation == "put":
-            self.api.put(
-                request["key"],
-                request["value"],
-            )
+        for key, value in range.items():
+            payload += pack_pair(key, value)
+
+        return payload
+
+    def _handle(self, request: bytes) -> Any:
+        operation = request[0]
+        payload = request[1:]
+
+        if operation == PUT:
+            key, value = unpack_pair(payload)
+            self.api.put(key, value)
             return None
 
-        if operation == "read":
-            return self.api.read(request["key"])
+        if operation == READ:
+            key = unpack_bytes(payload)
+            return self.api.read(key)
 
-        if operation == "range":
-            return self.api.read_key_range(
-                request["start"],
-                request["end"],
-            )
+        if operation == RANGE:
+            start, end = unpack_pair(payload)
+            return self._pack_range(self.api.read_key_range(start, end))
 
-        if operation == "batch_put":
-            self.api.batch_put(
-                request["keys"],
-                request["values"],
-            )
+        if operation == BATCH_PUT:
+            keys, values = unpack_batch(payload)
+            self.api.batch_put(keys, values)
             return None
 
-        if operation == "delete":
-            self.api.delete(request["key"])
+        if operation == DELETE:
+            key = unpack_bytes(payload)
+            self.api.delete(key)
             return None
 
         raise ValueError(f"unknown operation: {operation}")
@@ -98,26 +146,20 @@ class KVServer:
         return bytes(data)
 
     @classmethod
-    def _recv_message(cls, conn: socket.socket) -> Any:
+    def _recv_message(cls, conn: socket.socket) -> bytes | None:
         header = cls._recv_exact(conn, 4)
 
         if header is None:
             return None
 
         size = struct.unpack(">I", header)[0]
-        payload = cls._recv_exact(conn, size)
-
-        if payload is None:
-            raise ConnectionError("connection closed")
-
-        return pickle.loads(payload)
+        return cls._recv_exact(conn, size)
 
     @staticmethod
     def _send_message(
         conn: socket.socket,
-        message: Any,
+        message: bytes | None,
     ) -> None:
-        payload = pickle.dumps(message)
+        payload = message or b""
         header = struct.pack(">I", len(payload))
-
         conn.sendall(header + payload)

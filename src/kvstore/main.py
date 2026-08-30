@@ -8,10 +8,11 @@ class KVStoreAPI:
     def __init__(self, config: Config = Config()) -> None:
         self._engine = KVStoreEngine(config)
 
-    def __enter__(self):
+    def __enter__(self) -> "KVStoreAPI":
         self._engine.open()
+        return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type, exc, tb) -> None:
         self._engine.close()
 
     def put(self, key: bytes, value: bytes) -> None:
