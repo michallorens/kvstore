@@ -133,6 +133,7 @@ The implementation intentionally stops short of several production-storage featu
 - replication and failover to other node
 - a concurrent connection-handling architecture
 - explicit management of orphaned temporary files after crashes
+- test-suite - AI generated components such as MemTable and Client/Server aren't covered by tests yet
 
 The core persistence and recovery path is implemented and tested, including atomic SSTable publication and WAL replay based on persisted SSTable state.
 
