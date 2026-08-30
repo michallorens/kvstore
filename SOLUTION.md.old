@@ -62,12 +62,6 @@ REPLAY: 313.27 ms
 
 The trade-off is that the WAL segment size influences the size of the in-memory MemTable cache.
 
-Additionally, current implementation flushes the MemTable synchronously during rotation which causes a spike at the tail-end of the benchmark:
-
-```
-WRITE: p50=   18.76 us | p95=   46.11 us | p99=   65.47 us | p99.9=  108.23 us | max=95330.46 us
-```
-
 ### Sparse index tradeoff
 
 The SSTable hint index is intentionally sparse rather than indexing every record to facilitate the requirement of handling datasets larger than memory.

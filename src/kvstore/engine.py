@@ -1,6 +1,8 @@
 from collections import deque
 from threading import RLock
 from pathlib import Path
+from queue import Queue
+from threading import Thread
 from typing import Iterator
 
 from kvstore.memtable import MemTable, NOT_FOUND
@@ -8,6 +10,8 @@ from kvstore.wal import WAL
 from kvstore.config import Config
 from kvstore.record import Record
 from kvstore.sstable import SSTable
+
+STOP_FLUSH_WORKER = object()
 
 
 class KVStoreEngine:
@@ -23,20 +27,40 @@ class KVStoreEngine:
         self.memtable = MemTable()
         self.frozen_memtables: deque[MemTable] = deque()
 
+        self._flush_queue = Queue()
+        self._flush_thread = Thread(
+            target=self._flush_worker,
+            daemon=True,
+        )
+
     def _on_wal_rotate(self, segment: int) -> None:
         with self._lock:
             frozen = self.memtable
             frozen.freeze()
             self.memtable = MemTable()
             self.frozen_memtables.append(frozen)
+            self._flush_queue.put((segment, frozen))
 
-        sstable = SSTable.from_memtable(
-            frozen, Path(self.data_dir) / f"{segment:06d}.sst"
-        )
+    def _flush_worker(self) -> None:
+        while True:
+            item = self._flush_queue.get()
 
-        with self._lock:
-            self.sstables.append(sstable)
-            self.frozen_memtables.popleft()
+            try:
+                if item is STOP_FLUSH_WORKER:
+                    break
+
+                segment, frozen = item
+
+                sstable = SSTable.from_memtable(
+                    frozen,
+                    Path(self.data_dir) / f"{segment:06d}.sst",
+                )
+
+                with self._lock:
+                    self.sstables.append(sstable)
+                    self.frozen_memtables.remove(frozen)
+            finally:
+                self._flush_queue.task_done()
 
     def _next_wal_segment(self) -> int:
         if len(self.sstables) == 0:
@@ -44,6 +68,7 @@ class KVStoreEngine:
         return int(self.sstables[-1].path.stem) + 1
 
     def open(self) -> "KVStoreEngine":
+        self._flush_thread.start()
         self.sstables: deque[SSTable] = deque(
             SSTable(path) for path in sorted(self.data_dir.glob("*.sst"))
         )
@@ -57,6 +82,7 @@ class KVStoreEngine:
         return self.open()
 
     def close(self) -> None:
+        self._flush_queue.put(STOP_FLUSH_WORKER)
         self.wal.close()
         for sstable in self.sstables:
             sstable.close()

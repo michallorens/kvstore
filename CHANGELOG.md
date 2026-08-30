@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-30
+
+```
+READ : p50=  126.19 us | p95=  682.71 us | p99=  919.27 us | p99.9= 1362.58 us | max= 3497.73 us
+WRITE: p50=   17.29 us | p95=   34.25 us | p99=  101.01 us | p99.9=  721.69 us | max= 6367.66 us
+READ_RANGE_1000: p50= 2881.12 us | p95= 4003.62 us | p99= 4445.27 us | p99.9= 6348.25 us | max= 9444.37 us
+WRITE_BATCH: p50=   61.28 us | p95=  110.03 us | p99=  216.99 us | p99.9= 1161.29 us | max= 6816.68 us
+DELETE: p50=   17.21 us | p95=   32.93 us | p99=   72.81 us | p99.9=  592.77 us | max= 6530.87 us
+RATE : 1,873.20 ops/s
+REPLAY: 230.55 ms
+```
+
+### Changed
+
+- Moved MemTable flush to a background thread improving the tail-end write latency
+
 ## [0.11.2] - 2026-08-30
 
 ### Changed
