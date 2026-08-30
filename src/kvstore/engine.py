@@ -124,10 +124,12 @@ class KVStoreEngine:
 
         return None
 
-    def read_key_range(self, start: bytes, end: bytes) -> dict[bytes, bytes]:
+    def read_key_range(self, start: bytes, end: bytes) -> Iterator[tuple[bytes, bytes]]:
         result: dict[bytes, bytes | None] = {}
 
         for memtable in self._get_tables():
             result.update(memtable.range(start, end))
 
-        return {key: value for key, value in result.items() if value is not None}
+        for key, value in result.items():
+            if value is not None:
+                yield key, value

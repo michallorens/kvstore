@@ -1,7 +1,8 @@
 import socket
 import struct
+from typing import Iterator
 
-from kvstore.server import pack_bytes, pack_pair, unpack_batch
+from kvstore.server import pack_bytes, pack_pair, unpack_pair
 
 PUT = 0
 READ = 1
@@ -18,28 +19,38 @@ class KVClient:
     ) -> None:
         self.sock = socket.create_connection((host, port))
 
-    def _send(self, operation: int, payload: bytes = b"") -> bytes:
+    def _send(self, operation: int, payload: bytes = b"") -> None:
         message = operation.to_bytes(1) + payload
         self.sock.sendall(struct.pack(">I", len(message)) + message)
 
+    def _recv_message(self) -> bytes:
         header = self._recv_exact(4)
         size = struct.unpack(">I", header)[0]
-
         return self._recv_exact(size)
 
     def put(self, key: bytes, value: bytes) -> None:
         self._send(PUT, pack_pair(key, value))
+        self._recv_message()
 
     def read(self, key: bytes) -> bytes | None:
-        response = self._send(READ, pack_bytes(key))
-        return response or None
+        self._send(READ, pack_bytes(key))
+        return self._recv_message() or None
 
     def delete(self, key: bytes) -> None:
         self._send(DELETE, pack_bytes(key))
+        self._recv_message()
 
-    def range(self, start: bytes, end: bytes):
-        response = self._send(RANGE, pack_pair(start, end))
-        return unpack_batch(response)
+    def range(self, start: bytes, end: bytes) -> Iterator[tuple[bytes, bytes]]:
+        self._send(RANGE, pack_pair(start, end))
+
+        while True:
+            payload = self._recv_message()
+            print(payload)
+
+            if not payload:
+                return
+
+            yield unpack_pair(payload)
 
     def batch_put(
         self,

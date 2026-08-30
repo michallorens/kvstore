@@ -85,7 +85,9 @@ The networking layer is intentionally minimal: a TCP connection carries length-p
 
 I initially delegated more of this implementation to AI, but rejected parts of the generated design. In particular, the generated protocol represented the operation name as a string. Since the protocol currently has only five operations, I replaced this with a compact byte representation rather than carrying a string for every request.
 
-I also rejected using Python object serialization as the protocol representation. The final implementation operates explicitly on buffers, which keeps the wire format under our control and avoids coupling the protocol to Python object serialization.
+I also rejected using Python object serialization as the protocol representation. The final implementation operates explicitly on bytes, which keeps the wire format under our control and avoids coupling the protocol to Python object serialization.
+
+Range queries are implemented as a streaming operation: results are sent incrementally as individual key-value pairs rather than materializing the entire range into a single response. This allows large range queries to be consumed incrementally without requiring the complete result to fit in memory.
 
 ---
 
@@ -116,12 +118,6 @@ This would also require defining ordering semantics explicitly, likely using seq
 
 At a lower level, WAL writes could also be optimized by accumulating records into larger buffers or **filesystem-aligned pages** before issuing writes. This would reduce the overhead of many small write operations and complement request-level batching, although the primary bottleneck in the current implementation is expected to be fsync() rather than the individual write() calls.
 
-### Streaming range reads
-
-`read_key_range()` currently materializes its result as a dictionary. This is convenient for the API and tests but means memory usage grows with the result size.
-
-A production interface could expose an iterator or streaming protocol for large ranges.
-
 ### Replication
 
 The current implementation is single-node. Replication would require a substantially larger architectural addition, including an ordering/consensus mechanism and replicated durability semantics.
@@ -133,10 +129,9 @@ The current implementation is single-node. Replication would require a substanti
 The implementation intentionally stops short of several production-storage features:
 
 - SSTable compaction
-- replication
 - batched WAL writes
+- replication and failover to other node
 - a concurrent connection-handling architecture
-- streaming range queries
 - explicit management of orphaned temporary files after crashes
 
 The core persistence and recovery path is implemented and tested, including atomic SSTable publication and WAL replay based on persisted SSTable state.

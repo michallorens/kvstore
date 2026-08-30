@@ -78,12 +78,24 @@ class KVServer:
                 finally:
                     conn.close()
 
+    def _serve_range(self, conn: socket.socket, payload: bytes) -> None:
+        start, end = unpack_pair(payload)
+
+        for key, value in self.api.read_key_range(start, end):
+            self._send_message(conn, pack_pair(key, value))
+
+        self._send_message(conn, b"")
+
     def _serve_connection(self, conn: socket.socket) -> None:
         while True:
             request = self._recv_message(conn)
 
             if request is None:
                 return
+
+            if request[0] == RANGE:
+                self._serve_range(conn, request[1:])
+                continue
 
             response = self._handle(request)
             self._send_message(conn, response)
@@ -109,10 +121,6 @@ class KVServer:
         if operation == READ:
             key = unpack_bytes(payload)
             return self.api.read(key)
-
-        if operation == RANGE:
-            start, end = unpack_pair(payload)
-            return self._pack_range(self.api.read_key_range(start, end))
 
         if operation == BATCH_PUT:
             keys, values = unpack_batch(payload)

@@ -1,3 +1,5 @@
+from typing import Iterator
+
 from kvstore.config import Config
 from kvstore.engine import KVStoreEngine
 from kvstore.record import Record
@@ -27,8 +29,8 @@ class KVStoreAPI:
     def read(self, key: bytes) -> bytes | None:
         return self._engine.read(key)
 
-    def read_key_range(self, start: bytes, end: bytes) -> dict[bytes, bytes]:
-        return self._engine.read_key_range(start, end)
+    def read_key_range(self, start: bytes, end: bytes) -> Iterator[tuple[bytes, bytes]]:
+        yield from self._engine.read_key_range(start, end)
 
     def delete(self, key: bytes) -> None:
         self._engine.delete(key)
