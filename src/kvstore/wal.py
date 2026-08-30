@@ -71,9 +71,12 @@ class WAL:
         self._current.flush()
         fsync(self._current.fileno())
 
-    def append_batch(self, records: Iterable[Record]) -> None:
+    def append_batch(
+        self, records: Iterable[Record], on_write: Callable[[Record], None]
+    ) -> None:
         for record in records:
             self._write_to_wal(record)
+            on_write(record)
 
         self._current.flush()
         fsync(self._current.fileno())

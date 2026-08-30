@@ -45,7 +45,9 @@ class KVStoreEngine:
             self.frozen_memtables.popleft()
 
     def _next_wal_segment(self) -> int:
-        return int(self.sstables[-1].path.stem) + 1 if len(self.sstables) > 0 else -1
+        if len(self.sstables) == 0:
+            return 0
+        return int(self.sstables[-1].path.stem) + 1
 
     def __enter__(self):
         return self
@@ -62,15 +64,17 @@ class KVStoreEngine:
             self.wal.append(record)
             self.memtable.put(record)
 
+    def _append_to_current_memtable(self, record: Record) -> None:
+        self.memtable.put(record)
+
     def batch_put(self, keys: list[bytes], values: list[bytes]):
         if len(keys) != len(values):
             raise ValueError("keys and values must have the same length!")
 
+        records = [Record(k, v) for k, v in zip(keys, values)]
+
         with self._lock:
-            records = [Record(k, v) for k, v in zip(keys, values)]
-            self.wal.append_batch(records)
-            for record in records:
-                self.memtable.put(record)
+            self.wal.append_batch(records, on_write=self._append_to_current_memtable)
 
     def delete(self, key: bytes) -> None:
         with self._lock:
